@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 공간 상태 제보
+    match /reports/{reportId} {
+
+      // 누구나 읽기 가능
+      allow read: if true;
+
+      // 새 제보: 정해진 항목·값만 허용
+      allow create: if
+        request.resource.data.keys().hasAll(['spaceId', 'status', 'note', 'createdAt', 'confirms']) &&
+        request.resource.data.keys().hasOnly(['spaceId', 'status', 'note', 'createdAt', 'confirms']) &&
+        request.resource.data.spaceId is string &&
+        request.resource.data.spaceId.size() > 0 &&
+        request.resource.data.spaceId.size() <= 40 &&
+        request.resource.data.status in ['available', 'in_use', 'broken', 'closed'] &&
+        request.resource.data.note is string &&
+        request.resource.data.note.size() <= 200 &&
+        request.resource.data.createdAt == request.time &&   // 시각은 서버 시각만 허용
+        request.resource.data.confirms == 0;
+
+      // 수정: "확인했어요" 버튼(확인 수 +1)만 허용
+      allow update: if
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirms', 'lastConfirmedAt']) &&
+        request.resource.data.confirms == resource.data.confirms + 1 &&
+        request.resource.data.lastConfirmedAt == request.time;
+
+      // 삭제 금지
+      allow delete: if false;
+    }
+  }
+}

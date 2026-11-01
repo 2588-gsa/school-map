@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학교 통합 지도</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🏫 학교 통합 지도</h1>
+    <div class="search-wrap">
+      <input id="search" type="text" placeholder="교실·건물 이름 검색 (예: 물리실)" autocomplete="off">
+      <ul id="searchResults" class="hidden"></ul>
+    </div>
+    <span id="modeBadge"></span>
+  </header>
+
+  <main>
+    <section class="map-area">
+      <div class="map-toolbar">
+        <button id="backBtn" class="hidden">← 캠퍼스 전체</button>
+        <span id="breadcrumb">캠퍼스 전체</span>
+        <div id="floorTabs"></div>
+      </div>
+      <svg id="map" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="legend" id="legend"></div>
+
+      <!-- 개발용: 주소 끝에 ?edit=1 을 붙이면 나타남 -->
+      <div id="editBox" class="hidden">
+        <b>좌표 찍기 모드</b> — 지도 위를 드래그하면 사각형 좌표가 아래에 기록돼요.
+        <textarea id="editOutput" readonly></textarea>
+        <button id="editClear">지우기</button>
+      </div>
+    </section>
+
+    <aside id="panel"></aside>
+  </main>
+
+  <div id="toast" class="hidden"></div>
+
+  <!-- Firebase (CDN, compat 버전: 파일을 더블클릭해서 열어도 동작) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+  <script src="firebase-config.js"></script>
+  <script src="spaces.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
