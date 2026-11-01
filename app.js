@@ -173,12 +173,48 @@ function svgEl(tag, attrs = {}, text) {
   if (text !== undefined) e.textContent = text;
   return e;
 }
-function svgRect(o, cls) {
-  return svgEl("rect", { x: o.x, y: o.y, width: o.w, height: o.h, rx: 6, class: cls });
+// 사각형(x,y,w,h) 또는 다각형(points: "x1,y1 x2,y2 ...") 모양 만들기
+function svgShape(o, cls) {
+  if (o.points) return svgEl("polygon", { points: o.points, class: cls });
+  return svgEl("rect", { x: o.x, y: o.y, width: o.w, height: o.h, rx: 4, class: cls });
 }
-function svgLabel(o, text, cls = "label") {
-  return svgEl("text", { x: o.x + o.w / 2, y: o.y + o.h / 2, "text-anchor": "middle",
-                         "dominant-baseline": "middle", class: cls }, text);
+// 모양을 감싸는 사각형 (글자 위치, 배지 위치 계산용)
+function bbox(o) {
+  if (!o.points) return { x: o.x, y: o.y, w: o.w, h: o.h };
+  const p = o.points.trim().split(/\s+/).map((s) => s.split(",").map(Number));
+  const xs = p.map((q) => q[0]), ys = p.map((q) => q[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+// 칸 크기에 맞춰 글자 크기를 줄이고, 길면 두 줄로 나눔
+function svgLabel(o, text, cls = "label", maxSize = 18) {
+  const b = bbox(o);
+  let lines = [String(text)];
+  const len = (t) => [...t].length;
+  if (len(text) * maxSize > b.w - 6 && len(text) > 4) {
+    const words = String(text).split(" ");
+    if (words.length > 1) {
+      // 띄어쓰기 기준으로 두 줄의 길이가 비슷해지게 나눔
+      let best = 1, bestDiff = Infinity;
+      for (let i = 1; i < words.length; i++) {
+        const d = Math.abs(len(words.slice(0, i).join(" ")) - len(words.slice(i).join(" ")));
+        if (d < bestDiff) { bestDiff = d; best = i; }
+      }
+      lines = [words.slice(0, best).join(" "), words.slice(best).join(" ")];
+    } else {
+      const chars = [...text], half = Math.ceil(chars.length / 2);
+      lines = [chars.slice(0, half).join(""), chars.slice(half).join("")];
+    }
+  }
+  const longest = Math.max(...lines.map(len));
+  const size = Math.max(9, Math.min(maxSize, (b.w - 6) / longest, (b.h - 4) / (lines.length * 1.15)));
+  const t = svgEl("text", { x: b.x + b.w / 2, y: b.y + b.h / 2, "text-anchor": "middle",
+                           "dominant-baseline": "middle", class: cls, "font-size": size.toFixed(1) });
+  lines.forEach((ln, i) => {
+    const dy = lines.length === 1 ? 0 : (i === 0 ? -0.55 : 1.1);
+    t.appendChild(svgEl("tspan", { x: b.x + b.w / 2, dy: dy + "em" }, ln));
+  });
+  return t;
 }
 
 // ----- 7. 지도 그리기 -----
@@ -188,19 +224,23 @@ function renderMap() {
 
   if (state.view === "campus") {
     const c = MAP_DATA.campus;
-    svg.setAttribute("viewBox", `0 0 ${c.width} ${c.height}`);
+    svg.setAttribute("viewBox", `${c.x || 0} ${c.y || 0} ${c.width} ${c.height}`);
 
     (c.decor || []).forEach((d) => {
-      svg.appendChild(svgRect(d, "decor"));
-      svg.appendChild(svgLabel(d, d.label, "decor-label"));
+      svg.appendChild(svgShape(d, "decor kind-" + (d.kind || "etc")));
+      if (d.label) svg.appendChild(svgLabel(d, d.label, "decor-label", 26));
     });
 
     MAP_DATA.buildings.forEach((b) => {
       const g = svgEl("g");
-      const r = svgRect(b, "building");
-      r.addEventListener("click", () => { if (!state.edit) openBuilding(b.id); });
+      const r = svgShape(b, b.ready ? "building" : "building off");
+      r.addEventListener("click", () => {
+        if (state.edit) return;
+        if (b.ready) openBuilding(b.id);
+        else showToast(`${b.name}은(는) 아직 준비 중이에요.`);
+      });
       g.appendChild(r);
-      g.appendChild(svgLabel(b, b.name));
+      g.appendChild(svgLabel(b, b.name, b.ready ? "label campus-label" : "label campus-label off", 26));
 
       // 건물 안에 "기자재 이상/이용 불가"가 있으면 빨간 숫자 배지
       const issues = MAP_DATA.rooms.filter((room) => {
@@ -209,8 +249,9 @@ function renderMap() {
         return a && !a.stale && (a.latest.status === "broken" || a.latest.status === "closed");
       }).length;
       if (issues > 0) {
-        g.appendChild(svgEl("circle", { cx: b.x + b.w - 8, cy: b.y + 8, r: 16, class: "badge" }));
-        g.appendChild(svgEl("text", { x: b.x + b.w - 8, y: b.y + 9, "text-anchor": "middle",
+        const bb = bbox(b);
+        g.appendChild(svgEl("circle", { cx: bb.x + bb.w - 8, cy: bb.y + 8, r: 16, class: "badge" }));
+        g.appendChild(svgEl("text", { x: bb.x + bb.w - 8, y: bb.y + 9, "text-anchor": "middle",
                                       "dominant-baseline": "middle", class: "badge-text" }, issues));
       }
       svg.appendChild(g);
@@ -222,21 +263,21 @@ function renderMap() {
     MAP_DATA.floorDecor
       .filter((d) => d.building === state.buildingId && d.floor === state.floor)
       .forEach((d) => {
-        svg.appendChild(svgRect(d, "decor"));
-        svg.appendChild(svgLabel(d, d.label, "decor-label"));
+        svg.appendChild(svgShape(d, "decor kind-" + (d.kind || "etc")));
+        if (d.label) svg.appendChild(svgLabel(d, d.label, "decor-label", 15));
       });
 
     MAP_DATA.rooms
       .filter((r) => r.building === state.buildingId && r.floor === state.floor)
       .forEach((room) => {
         const a = analyze(room.id);
-        const rect = svgRect(room, "room");
+        const rect = svgShape(room, "room");
         rect.setAttribute("fill", a ? STATUS[a.latest.status].color : NO_INFO_COLOR);
         if (a && a.stale) rect.classList.add("stale");
         if (room.id === state.selectedId) rect.classList.add("selected");
         rect.addEventListener("click", () => { if (!state.edit) selectRoom(room.id); });
         svg.appendChild(rect);
-        svg.appendChild(svgLabel(room, room.name));
+        svg.appendChild(svgLabel(room, room.name, "label", 17));
       });
   }
   renderToolbar();
@@ -451,8 +492,8 @@ function search(query) {
     if (s) results.push({ kind: "room", id: r.id, name: r.name,
                           sub: `${buildingById(r.building).name} ${r.floor}층`, s });
   });
-  MAP_DATA.buildings.forEach((b) => {
-    const s = score([b.name, b.id, ...(b.aliases || [])]);
+  MAP_DATA.buildings.filter((b) => b.ready).forEach((b) => {
+    const s = score([b.name, ...(b.aliases || [])]);
     if (s) results.push({ kind: "building", id: b.id, name: b.name, sub: "건물", s });
   });
   return results.sort((a, b) => b.s - a.s).slice(0, 8);

@@ -29,16 +29,25 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 #floorTabs button.on { background: #1f3a5f; color: #fff; border-color: #1f3a5f; }
 
 /* 지도 */
-#map { width: 100%; height: auto; display: block; background: #eef2ea; border-radius: 8px; touch-action: none; }
-#map .decor { fill: #dfe6d6; stroke: #c4cdb9; }
-#map .decor-label { fill: #8a957d; font-size: 18px; pointer-events: none; }
-#map .building { fill: #c9d6e8; stroke: #6d84a8; stroke-width: 2; cursor: pointer; }
-#map .building:hover { fill: #b4c7e3; }
+#map { width: 100%; height: auto; max-height: 75vh; display: block; background: #eef2ea; border-radius: 8px; touch-action: none; }
+#map .decor { fill: #e4e7ea; stroke: #c9ced4; }
+#map .decor.kind-field { fill: #e8dcc4; stroke: #cdbd9c; }
+#map .decor.kind-court { fill: #9fb6c9; stroke: #7f98ad; }
+#map .decor.kind-link { fill: #d5dae0; stroke: #b9c0c8; }
+#map .decor.kind-corridor { fill: #f1f3f5; stroke: #d5d9de; }
+#map .decor.kind-stairs { fill: #d9dde2; stroke: #b9c0c8; }
+#map .decor.kind-toilet { fill: #f6e1da; stroke: #e2c3b8; }
+#map .decor-label { fill: #7b8490; pointer-events: none; }
+#map .building { fill: #c9d6e8; stroke: #4f6b96; stroke-width: 3; cursor: pointer; }
+#map .building:hover { fill: #a9c0e3; }
+#map .building.off { fill: #e1e4e8; stroke: #b3bac3; stroke-dasharray: 8 6; cursor: default; }
+#map .building.off:hover { fill: #e1e4e8; }
+#map .label.off { fill: #9aa3ad; font-weight: normal; }
 #map .room { stroke: #555; stroke-width: 1.5; cursor: pointer; }
 #map .room:hover { filter: brightness(.93); }
 #map .room.selected { stroke: #1f3a5f; stroke-width: 5; }
 #map .room.stale { fill-opacity: .35; stroke-dasharray: 8 5; }
-#map .label { font-size: 20px; fill: #222; pointer-events: none; font-weight: bold; }
+#map .label { fill: #222; pointer-events: none; font-weight: bold; }
 #map .badge { fill: #d9534f; }
 #map .badge-text { fill: #fff; font-size: 16px; font-weight: bold; pointer-events: none; }
 #map .draft { fill: rgba(47,111,214,.2); stroke: #2f6fd6; stroke-dasharray: 6 4; pointer-events: none; }
