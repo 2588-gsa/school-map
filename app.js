@@ -186,6 +186,13 @@ function bbox(o) {
   const x = Math.min(...xs), y = Math.min(...ys);
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
+function bestDiffOf(words) {
+  const len = (t) => [...t].length;
+  let best = Infinity;
+  for (let i = 1; i < words.length; i++)
+    best = Math.min(best, Math.abs(len(words.slice(0, i).join(" ")) - len(words.slice(i).join(" "))));
+  return best;
+}
 // 칸 크기에 맞춰 글자 크기를 줄이고, 길면 두 줄로 나눔
 function svgLabel(o, text, cls = "label", maxSize = 18) {
   const b = bbox(o);
@@ -201,7 +208,8 @@ function svgLabel(o, text, cls = "label", maxSize = 18) {
         if (d < bestDiff) { bestDiff = d; best = i; }
       }
       lines = [words.slice(0, best).join(" "), words.slice(best).join(" ")];
-    } else {
+    }
+    if (words.length === 1 || bestDiffOf(words) >= 3) {   // 띄어쓰기로 나누면 한쪽이 너무 짧을 때
       const chars = [...text], half = Math.ceil(chars.length / 2);
       lines = [chars.slice(0, half).join(""), chars.slice(half).join("")];
     }
