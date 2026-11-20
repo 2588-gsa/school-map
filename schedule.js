@@ -9,6 +9,8 @@ let TIMETABLE = null;
 let HAS_TT = false;
 const DAY_NAMES = ["일", "월", "화", "수", "목", "금", "토"];
 const ttNorm = (s) => String(s || "").toLowerCase().replace(/\s+/g, "");
+// 학번 표기: 20515 → 2515 (가운데 0 빼기). 내부(로그인 계정)는 5자리 그대로 씀
+const showId = (id) => (/^\d0\d{3}$/.test(id || "") ? id[0] + id.slice(2) : id || "");
 const toMin = (hm) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
 
 // ----- 1. 데이터 정리 (배열 → 객체, 찾기 쉽게 색인) -----
@@ -181,7 +183,7 @@ function ttSearchItems() {
     items.push({ kind: "teacher", id: t, name: t, sub: "선생님", keys: [t, t + "선생님", t + "쌤"] }));
   TT.students.forEach((s) =>
     items.push({ kind: "student", id: s.id || s.name, name: s.name,
-                 sub: s.id ? `${s.id[0]}학년 학생 · ${s.id}` : "학생", keys: [s.name, s.id] }));
+                 sub: s.id ? `${s.id[0]}학년 학생 · ${showId(s.id)}` : "학생", keys: [s.name, s.id, showId(s.id)] }));
   Object.keys(TT.classes).forEach((c) =>
     items.push({ kind: "class", id: c, name: c, sub: "1학년 반 시간표", keys: [c, c.replace("반", "")] }));
   return items;
