@@ -23,6 +23,9 @@ const state = {
   buildingId: null,
   floor: null,
   selectedId: null,    // 선택한 공간 id
+  person: null,        // 검색한 선생님/학생/반 { kind, id }
+  highlightId: null,   // 사람 검색 결과로 지도에서 강조할 교실
+  timeOverride: null,  // 시간 바꿔보기 { day, period } (null이면 지금 시각)
   reports: [],         // 최신순으로 정렬된 제보 목록
   draft: { roomId: null, status: null, note: "" },   // 작성 중인 제보 (다시 그려도 유지)
   edit: new URLSearchParams(location.search).get("edit") === "1"
@@ -282,7 +285,7 @@ function renderMap() {
         const rect = svgShape(room, "room");
         rect.setAttribute("fill", a ? STATUS[a.latest.status].color : NO_INFO_COLOR);
         if (a && a.stale) rect.classList.add("stale");
-        if (room.id === state.selectedId) rect.classList.add("selected");
+        if (room.id === state.selectedId || room.id === state.highlightId) rect.classList.add("selected");
         rect.addEventListener("click", () => { if (!state.edit) selectRoom(room.id); });
         svg.appendChild(rect);
         svg.appendChild(svgLabel(room, room.name, "label", 17));
@@ -321,11 +324,13 @@ function renderLegend() {
 function renderPanel() {
   const panel = $("panel");
   panel.innerHTML = "";
+  if (state.person && HAS_TT) { renderPersonPanel(panel); return; }
   const room = state.selectedId ? roomById(state.selectedId) : null;
 
   if (!room) {
     panel.appendChild(el("h2", {}, state.view === "campus" ? "건물을 선택하세요" : "공간을 선택하세요"));
-    panel.appendChild(el("div", { class: "meta" }, "지도를 누르거나 위에서 검색할 수 있어요."));
+    panel.appendChild(el("div", { class: "meta" }, "지도를 누르거나 위에서 교실·선생님·학생 이름으로 검색할 수 있어요."));
+    if (HAS_TT) panel.appendChild(el("div", { class: "now-line" }, "🕒 " + currentSlot(state.timeOverride).label));
     renderRecentAll(panel);
     return;
   }
@@ -333,6 +338,7 @@ function renderPanel() {
   const b = buildingById(room.building);
   panel.appendChild(el("h2", {}, room.name));
   panel.appendChild(el("div", { class: "meta" }, `${b.name} ${room.floor}층 · ${room.type}`));
+  if (HAS_TT) panel.appendChild(roomScheduleBox(room));
 
   // 현재 상태
   const a = analyze(room.id);
@@ -361,7 +367,7 @@ function renderPanel() {
         .then(() => showToast("확인해 주셔서 고마워요!"))
         .catch((e) => { showToast("실패: " + e.message, true); cbtn.disabled = false; });
     });
-    box.appendChild(cbtn);
+    if (canWrite()) box.appendChild(cbtn);
     panel.appendChild(box);
   }
 
@@ -407,6 +413,12 @@ function renderRecentAll(panel) {
 function buildForm(room) {
   const form = el("div", { class: "form" });
   form.appendChild(el("h3", {}, "상태 알리기"));
+  if (!canWrite()) {
+    const b = el("button", { class: "primary" }, "로그인하고 상태 알리기");
+    b.addEventListener("click", showLoginModal);
+    form.appendChild(b);
+    return form;
+  }
 
   const choices = el("div", { class: "status-choices" });
   Object.entries(STATUS).forEach(([key, s]) => {
@@ -453,6 +465,168 @@ function buildForm(room) {
   return form;
 }
 
+// ----- 8-1. 시간표 화면 -----
+const PERSON_LABEL = { teacher: "선생님", student: "학생", class: "1학년 반" };
+
+// 수업 하나를 "과목 · 선생님 · 교실" 한 줄로 (교실이 지도에 있으면 누를 수 있게)
+function sessionLine(s, showTeacher = true) {
+  const line = el("div", { class: "tt-line" });
+  line.appendChild(el("b", {}, s.title));
+  if (showTeacher && s.teachers.length) line.appendChild(el("span", { class: "tt-sub" }, " · " + s.teachers.join(", ")));
+  line.appendChild(roomLink(s.room));
+  return line;
+}
+function roomLink(text) {
+  if (!text) return el("span", { class: "tt-sub" }, " · 교실 미정");
+  const r = resolveRoom(text);
+  if (!r) return el("span", { class: "tt-sub" }, " · " + text);
+  const label = /^\d/.test(r.name) ? `${buildingById(r.building).name} ${r.name}` : r.name;
+  const a = el("a", { class: "tt-room", href: "#" }, " · 📍" + label);
+  a.addEventListener("click", (e) => { e.preventDefault(); goToRoom(r.id); });
+  return a;
+}
+
+// 교실 패널 위쪽: 지금 이 교실 수업 + 오늘 시간표
+function roomScheduleBox(room) {
+  const slot = currentSlot(state.timeOverride);
+  const box = el("div", { class: "tt-box" });
+  box.appendChild(el("div", { class: "tt-head" }, "🕒 " + slot.label));
+  if (slot.inClass) {
+    const { list, study } = roomAt(room.id, slot);
+    if (list.length) list.forEach((s) => box.appendChild(sessionLine(s)));
+    else if (study) box.appendChild(el("div", { class: "tt-line" }, `공강 자습실 (${study.ids.length}명)`));
+    else box.appendChild(el("div", { class: "tt-empty" }, "시간표상 지금 이 교실에서 하는 수업이 없어요."));
+  }
+  // 오늘 이 교실 시간표
+  if (DAY_NAMES.indexOf(slot.day) >= 1 && DAY_NAMES.indexOf(slot.day) <= 5) {
+    const rows = dayRows(slot, (sl) => roomAt(room.id, sl));
+    const used = rows.filter((r) => r.value.list.length || r.value.study);
+    const det = el("details", {});
+    det.appendChild(el("summary", {}, `${mdLabel(slot.date, slot.day)} 이 교실 시간표 (${used.length}교시 사용)`));
+    rows.forEach((r) => {
+      const v = r.value;
+      const txt = v.list.length ? v.list.map((s) => s.title).join(", ")
+                : v.study ? `공강 자습 (${v.study.ids.length}명)` : "—";
+      const row = el("div", { class: "tt-row" + (r.period === slot.period ? " now" : "") });
+      row.appendChild(el("span", { class: "tt-p" }, r.period + "교시"));
+      row.appendChild(el("span", {}, txt));
+      det.appendChild(row);
+    });
+    box.appendChild(det);
+  }
+  box.appendChild(el("div", { class: "tt-note" }, "※ 시간표에 교실이 적힌 수업만 표시돼요."));
+  return box;
+}
+
+// 선생님/학생/반을 검색했을 때
+function openPerson(kind, id) {
+  state.person = { kind, id };
+  state.selectedId = null;
+  state.highlightId = null;
+  // 지금 있는 교실을 알면 지도에서 그 층으로 이동해서 강조
+  const now = personNow(kind, id, currentSlot(state.timeOverride));
+  const r = now.room ? resolveRoom(now.room) : null;
+  if (r) {
+    state.view = "building"; state.buildingId = r.building; state.floor = r.floor; state.highlightId = r.id;
+  }
+  renderAll();
+}
+
+function findStudent(id) { return TT.students.find((s) => (s.id || s.name) === id); }
+
+// 지금 어디서 무엇을 하는지 → { text, sessions, room }
+function personNow(kind, id, slot) {
+  if (!slot.inClass) return { text: slot.label, sessions: [], room: null };
+  if (kind === "teacher") {
+    const list = teacherAt(id, slot);
+    return list.length ? { sessions: list, room: list[0].room } : { text: "지금은 수업이 없어요.", sessions: [], room: null };
+  }
+  if (kind === "class") {
+    const list = classAt(id, slot);
+    return list.length ? { sessions: list, room: list[0].room } : { text: "지금은 수업이 없어요.", sessions: [], room: null };
+  }
+  const st = findStudent(id);
+  const v = studentAt(st, slot);
+  if (v.kind === "class") return { sessions: v.sessions, room: v.sessions[0].room };
+  if (v.kind === "study") return { text: "공강 · 자습", sessions: [], room: v.room };
+  if (v.kind === "activity") return { text: v.activity, sessions: [], room: null };
+  return { text: "지금은 수업이 없어요.", sessions: [], room: null };
+}
+
+function renderPersonPanel(panel) {
+  const { kind, id } = state.person;
+  const slot = currentSlot(state.timeOverride);
+  const st = kind === "student" ? findStudent(id) : null;
+  panel.appendChild(el("h2", {}, kind === "teacher" ? `${id} 선생님` : st ? st.name : id));
+  panel.appendChild(el("div", { class: "meta" }, st && st.id ? `${st.id[0]}학년 학생 · ${st.id}` : PERSON_LABEL[kind]));
+
+  // 지금
+  const box = el("div", { class: "tt-box" });
+  box.appendChild(el("div", { class: "tt-head" }, "🕒 " + slot.label));
+  const now = personNow(kind, id, slot);
+  if (slot.inClass) {
+    if (now.sessions.length) now.sessions.forEach((s) => box.appendChild(sessionLine(s, kind !== "teacher")));
+    else {
+      const line = el("div", { class: "tt-line" });
+      line.appendChild(el("b", {}, now.text));
+      if (now.room) line.appendChild(roomLink(now.room));
+      box.appendChild(line);
+    }
+  }
+  panel.appendChild(box);
+
+  // 하루 시간표
+  const weekday = DAY_NAMES.indexOf(slot.day) >= 1 && DAY_NAMES.indexOf(slot.day) <= 5;
+  const day = weekday ? slot.day : "월";
+  const hist = el("div", { class: "history" });
+  hist.appendChild(el("h3", {}, weekday ? `${mdLabel(slot.date, day)} 시간표` : "월요일 시간표 (정규 수업)"));
+  TIMETABLE.periods.forEach((p) => {
+    const v = personNow(kind, id, { day, date: weekday ? slot.date : "", period: p.p, inClass: true });
+    const row = el("div", { class: "tt-row" + (slot.inClass && p.p === slot.period ? " now" : "") });
+    row.appendChild(el("span", { class: "tt-p" }, p.p + "교시"));
+    const cell = el("span", {});
+    if (v.sessions.length) {
+      v.sessions.forEach((s, i) => {
+        if (i) cell.appendChild(document.createTextNode(" / "));
+        cell.appendChild(document.createTextNode(s.title + (kind === "teacher" ? "" : s.teachers.length ? ` (${s.teachers.join(", ")})` : "")));
+        cell.appendChild(roomLink(s.room));
+      });
+    } else {
+      cell.appendChild(document.createTextNode(v.text === "지금은 수업이 없어요." ? "—" : v.text));
+      if (v.room) cell.appendChild(roomLink(v.room));
+    }
+    row.appendChild(cell);
+    hist.appendChild(row);
+  });
+  panel.appendChild(hist);
+}
+
+// 시간 바꿔보기 (테스트·발표용): 날짜와 교시를 고르면 그 시간 기준으로 보여 줌
+function setupTimeBox() {
+  const box = $("timeBox");
+  box.innerHTML = "";
+  state.timeOverride = null;
+  if (!HAS_TT) return;
+  const mode = el("select", { title: "기준 시간" });
+  mode.appendChild(el("option", { value: "" }, "🕒 지금"));
+  mode.appendChild(el("option", { value: "pick" }, "📅 날짜 선택"));
+  const dateIn = el("input", { type: "date", class: "hidden", value: ymd(new Date()) });
+  const perSel = el("select", { title: "교시", class: "hidden" });
+  TIMETABLE.periods.forEach((p) => perSel.appendChild(el("option", { value: p.p }, p.p + "교시")));
+  const apply = () => {
+    const pick = mode.value === "pick" && dateIn.value;
+    state.timeOverride = pick ? { date: dateIn.value, period: Number(perSel.value) } : null;
+    dateIn.classList.toggle("hidden", mode.value !== "pick");
+    perSel.classList.toggle("hidden", mode.value !== "pick");
+    if (state.person) openPerson(state.person.kind, state.person.id); else renderAll();
+  };
+  [mode, dateIn, perSel].forEach((x) => x.addEventListener("change", apply));
+  box.append(mode, dateIn, perSel);
+}
+
+// 상태 등록·확인은 로그인한 사람만 (로컬 테스트 모드는 예외)
+function canWrite() { return store.mode !== "firebase" || !!auth.user; }
+
 // ----- 9. 이동 -----
 function openBuilding(id) {
   const b = buildingById(id);
@@ -460,21 +634,27 @@ function openBuilding(id) {
   state.buildingId = id;
   state.floor = b.floors[0];
   state.selectedId = null;
+  state.person = null;
+  state.highlightId = null;
   renderAll();
 }
-function selectRoom(id) { state.selectedId = id; renderAll(); }
+function selectRoom(id) { state.selectedId = id; state.person = null; state.highlightId = null; renderAll(); }
 function goToRoom(id) {
   const room = roomById(id);
   state.view = "building";
   state.buildingId = room.building;
   state.floor = room.floor;
   state.selectedId = id;
+  state.person = null;
+  state.highlightId = null;
   renderAll();
 }
 function goCampus() {
   state.view = "campus";
   state.buildingId = null;
   state.selectedId = null;
+  state.person = null;
+  state.highlightId = null;
   renderAll();
 }
 
@@ -504,7 +684,11 @@ function search(query) {
     const s = score([b.name, ...(b.aliases || [])]);
     if (s) results.push({ kind: "building", id: b.id, name: b.name, sub: "건물", s });
   });
-  return results.sort((a, b) => b.s - a.s).slice(0, 8);
+  ttSearchItems().forEach((it) => {
+    const s = score(it.keys.filter(Boolean));
+    if (s) results.push({ ...it, s });
+  });
+  return results.sort((a, b) => b.s - a.s).slice(0, 10);
 }
 
 function setupSearch() {
@@ -515,7 +699,9 @@ function setupSearch() {
   const choose = (item) => {
     ul.classList.add("hidden");
     input.value = item.name;
-    if (item.kind === "room") goToRoom(item.id); else openBuilding(item.id);
+    if (item.kind === "room") goToRoom(item.id);
+    else if (item.kind === "building") openBuilding(item.id);
+    else openPerson(item.kind, item.id);
   };
 
   input.addEventListener("input", () => {
@@ -620,6 +806,8 @@ function start() {
   setupSearch();
   setupEditMode();
   renderLegend();
+  setupTimeBox();
+  setupAuth();
 
   store.subscribe((list) => {
     // 알 수 없는 상태값이나 없는 공간의 제보는 무시

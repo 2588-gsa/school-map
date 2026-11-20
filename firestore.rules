@@ -2,14 +2,27 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 공간 상태 제보
-    match /reports/{reportId} {
+    // ---------- 공통 함수 ----------
+    function signedIn() { return request.auth != null; }
+    // 관리자: Authentication에서 직접 만든 admin 계정
+    function isAdmin() {
+      return signedIn() && request.auth.token.email == 'admin@school-map.local';
+    }
+    // 로그인 아이디 = 이메일의 @ 앞부분 (학번 또는 t+선생님 이름)
+    function loginId() { return request.auth.token.email.split('@')[0]; }
+    // 명단(private/roster)에 있는 사람인지
+    function onRoster() {
+      return signedIn() &&
+        loginId() in get(/databases/$(database)/documents/private/roster).data.ids;
+    }
 
-      // 누구나 읽기 가능
+    // ---------- 공간 상태 제보 ----------
+    match /reports/{reportId} {
+      // 지도 상태는 누구나 볼 수 있음
       allow read: if true;
 
-      // 새 제보: 정해진 항목·값만 허용
-      allow create: if
+      // 새 제보: 명단에 있는 사람만, 정해진 항목·값만
+      allow create: if onRoster() &&
         request.resource.data.keys().hasAll(['spaceId', 'status', 'note', 'createdAt', 'confirms']) &&
         request.resource.data.keys().hasOnly(['spaceId', 'status', 'note', 'createdAt', 'confirms']) &&
         request.resource.data.spaceId is string &&
@@ -18,17 +31,23 @@ service cloud.firestore {
         request.resource.data.status in ['available', 'in_use', 'broken', 'closed'] &&
         request.resource.data.note is string &&
         request.resource.data.note.size() <= 200 &&
-        request.resource.data.createdAt == request.time &&   // 시각은 서버 시각만 허용
+        request.resource.data.createdAt == request.time &&
         request.resource.data.confirms == 0;
 
-      // 수정: "확인했어요" 버튼(확인 수 +1)만 허용
-      allow update: if
+      // 수정: "지금도 맞아요"(확인 수 +1)만
+      allow update: if onRoster() &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirms', 'lastConfirmedAt']) &&
         request.resource.data.confirms == resource.data.confirms + 1 &&
         request.resource.data.lastConfirmedAt == request.time;
 
-      // 삭제 금지
-      allow delete: if false;
+      // 삭제: 관리자만 (장난 제보 지우기)
+      allow delete: if isAdmin();
+    }
+
+    // ---------- 비공개 데이터 (시간표, 명단) ----------
+    match /private/{docId} {
+      allow read: if onRoster() || isAdmin();
+      allow write: if isAdmin();
     }
   }
 }

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>학교 통합 지도 - 관리자</title>
+  <style>
+    * { box-sizing: border-box; font-family: 'Malgun Gothic', sans-serif; }
+    body { background: #f4f6f8; margin: 0; padding: 30px 16px; }
+    .box { max-width: 520px; margin: auto; background: #fff; border-radius: 14px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    h2 { font-size: 16px; margin: 22px 0 8px; }
+    p { color: #555; font-size: 14px; line-height: 1.6; margin: 6px 0; }
+    input { width: 100%; padding: 10px; margin: 4px 0; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+    button { padding: 10px 16px; border: none; border-radius: 8px; background: #2f6fd6; color: #fff; font-size: 14px; cursor: pointer; margin-top: 6px; }
+    button:disabled { opacity: .5; }
+    #log { white-space: pre-wrap; background: #f6f7f9; border-radius: 8px; padding: 10px; font-size: 13px; min-height: 40px; margin-top: 12px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+<div class="box">
+  <h1>🔒 관리자 페이지</h1>
+  <p>시간표 데이터(timetable-data.json)를 Firestore에 올리는 곳이에요. 관리자 계정으로만 쓸 수 있어요.</p>
+
+  <div id="loginArea">
+    <h2>1. 관리자 로그인</h2>
+    <input id="pw" type="password" placeholder="관리자 비밀번호 (Firebase에서 admin 계정 만들 때 정한 것)">
+    <button id="loginBtn">로그인</button>
+  </div>
+
+  <div id="uploadArea" class="hidden">
+    <h2>2. 시간표 데이터 올리기</h2>
+    <p>Claude가 보내준 <b>timetable-data.json</b> 파일을 고르세요. (GitHub에는 올리지 마세요!)</p>
+    <input id="file" type="file" accept=".json">
+    <button id="uploadBtn">업로드</button>
+    <button id="logoutBtn" style="background:#888">로그아웃</button>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+  const ADMIN_EMAIL = "admin@school-map.local";
+  const $ = (id) => document.getElementById(id);
+  const log = (m) => { $("log").textContent = m; };
+
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const fa = firebase.auth(), db = firebase.firestore();
+  fa.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+
+  fa.onAuthStateChanged((u) => {
+    const ok = u && u.email === ADMIN_EMAIL;
+    $("loginArea").classList.toggle("hidden", !!ok);
+    $("uploadArea").classList.toggle("hidden", !ok);
+    if (u && !ok) { log("관리자 계정이 아니에요."); fa.signOut(); }
+    else if (ok) log("관리자로 로그인했어요.");
+  });
+
+  $("loginBtn").onclick = async () => {
+    try { await fa.signInWithEmailAndPassword(ADMIN_EMAIL, $("pw").value); }
+    catch (e) { log("로그인 실패: " + e.code); }
+  };
+  $("logoutBtn").onclick = () => fa.signOut();
+
+  $("uploadBtn").onclick = async () => {
+    const f = $("file").files[0];
+    if (!f) { log("파일을 골라 주세요."); return; }
+    $("uploadBtn").disabled = true;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!data.timetable || !data.roster) throw new Error("timetable-data.json 파일이 맞는지 확인해 주세요.");
+      const ids = {};
+      Object.keys(data.roster).forEach((k) => { ids[k] = true; });
+      // 명단 먼저 → 시간표 (규칙이 명단을 보고 읽기 권한을 정함)
+      await db.collection("private").doc("roster").set({ ids, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await db.collection("private").doc("timetable").set({
+        json: JSON.stringify(data.timetable),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      const t = data.timetable;
+      log(`✅ 업로드 완료\n명단 ${Object.keys(ids).length}명 (학생 ${Object.values(data.roster).filter((v) => v === "student").length}, 선생님 ${Object.values(data.roster).filter((v) => v === "teacher").length})\n정규 수업 ${t.sessions.length}개, 방과후 ${t.extra.length}개`);
+    } catch (e) {
+      log("업로드 실패: " + e.message);
+    } finally {
+      $("uploadBtn").disabled = false;
+    }
+  };
+</script>
+</body>
+</html>
