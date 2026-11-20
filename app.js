@@ -580,7 +580,7 @@ function dormBox(room) {
     // 학번이 없는 학생(예: 복학생)은 이름으로 찾음
     const key = id || (TT.students.some((x) => !x.id && x.name === name) ? name : "");
     const line = el("div", { class: "tt-line" });
-    line.appendChild(key ? personLink("student", key, id ? `${name} (${showId(id)})` : name)
+    line.appendChild(key ? personLink("student", key, id ? `${name} (${id})` : name)
                          : el("span", {}, name + " (학번 확인 필요)"));
     box.appendChild(line);
   });
@@ -633,7 +633,7 @@ function renderPersonPanel(panel) {
   const slot = currentSlot(state.timeOverride);
   const st = kind === "student" ? findStudent(id) : null;
   panel.appendChild(el("h2", {}, kind === "teacher" ? `${id} 선생님` : st ? st.name : id));
-  const meta = st && st.id ? `${st.id[0]}학년 학생 · ${showId(st.id)}`
+  const meta = st && st.id ? `${st.id[0]}학년 학생 · ${st.id}`
     : kind === "teacher" ? `담당 수업 주 ${(TT.teachers[id] || []).length}시간` : PERSON_LABEL[kind];
   panel.appendChild(el("div", { class: "meta" }, meta));
   if (st && TT.dormOf[st.id]) {

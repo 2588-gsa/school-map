@@ -142,3 +142,5 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .day-tabs button.on { background: #1f3a5f; color: #fff; border-color: #1f3a5f; }
 .stu-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 8px; font-size: 13px; }
 .stu-grid a { padding: 3px 0; }
+.dorm-line { margin: -6px 0 10px; font-size: 13px; }
+#map .decor.kind-etc { fill: #e9ecef; stroke: #cfd4da; }
