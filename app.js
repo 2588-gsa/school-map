@@ -548,7 +548,7 @@ function personNow(kind, id, slot) {
   const st = findStudent(id);
   const v = studentAt(st, slot);
   if (v.kind === "class") return { sessions: v.sessions, room: v.sessions[0].room };
-  if (v.kind === "study") return { text: "공강 · 자습", sessions: [], room: v.room };
+  if (v.kind === "study") return { text: v.text || "공강 · 자습", sessions: [], room: v.room || null };
   if (v.kind === "activity") return { text: v.activity, sessions: [], room: null };
   return { text: "지금은 수업이 없어요.", sessions: [], room: null };
 }

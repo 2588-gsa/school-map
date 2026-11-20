@@ -125,7 +125,7 @@ const MAP_DATA = {
     { id: "S2-화학연구실", name: "화학 연구실", aliases: [], building: "S", floor: 2, type: "연구실", x: 333, y: 220, w: 75, h: 130 },
     { id: "S2-화학강의실", name: "화학 강의실", aliases: [], building: "S", floor: 2, type: "강의실", x: 623, y: 220, w: 64, h: 130 },
     { id: "S3-물리물품실", name: "물리 물품실", aliases: ["물품실"], building: "S", floor: 3, type: "물품실", x: 20, y: 20, w: 74, h: 130 },
-    { id: "S3-일반물리실험실", name: "일반물리 실험실", aliases: ["일반물리실", "일반 물리실"], building: "S", floor: 3, type: "실험실", x: 94, y: 20, w: 83, h: 130 },
+    { id: "S3-일반물리실험실", name: "일반물리 실험실", aliases: ["일반물리실", "일반 물리실", "일반물리학실험실"], building: "S", floor: 3, type: "실험실", x: 94, y: 20, w: 83, h: 130 },
     { id: "S3-현대물리실험실", name: "현대물리 실험실", aliases: [], building: "S", floor: 3, type: "실험실", x: 177, y: 20, w: 80, h: 130 },
     { id: "S3-광학실험실", name: "광학 실험실", aliases: [], building: "S", floor: 3, type: "실험실", x: 257, y: 20, w: 82, h: 130 },
     { id: "S3-I&D창작실", name: "I&D 창작실", aliases: ["아이디창작실"], building: "S", floor: 3, type: "기타", x: 339, y: 20, w: 65, h: 130 },

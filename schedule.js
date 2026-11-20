@@ -35,8 +35,9 @@ function loadTimetable(data) {
     (TT.extraBySlot[`${e.date}-${e.period}`] ||= []).push(e);
     e.teachers.forEach((t) => (TT.teacherExtra[t] ||= []).push(e));
   });
-  TT.students = data.students.map(([id, name, idx, eidx]) =>
-    ({ id, name, sessions: idx.map((n) => TT.sessions[n]), extra: (eidx || []).map((n) => TT.extra[n]) }));
+  TT.students = data.students.map(([id, name, idx, eidx, personal]) =>
+    ({ id, name, sessions: idx.map((n) => TT.sessions[n]), extra: (eidx || []).map((n) => TT.extra[n]),
+       personal: (personal || []).map(([day, period, text, room]) => ({ day, period, text, room })) }));
   data.free.forEach((f) => { TT.freeBySlot[`${f.day}-${f.period}`] = f; });
   HAS_TT = true;
 }
@@ -130,6 +131,9 @@ function studentAt(stu, slot) {
   const list = [...stu.sessions.filter((x) => x.day === day && x.period === period),
                 ...stu.extra.filter((e) => e.date === slot.date && e.period === period)];
   if (list.length) return { kind: "class", sessions: list };
+  // 학생별 추가 일정 (예: 공강 자습실, 심화 R&E)
+  const pe = stu.personal.find((x) => x.day === day && x.period === period);
+  if (pe) return { kind: "study", text: pe.text, room: pe.room };
   const f = TT.freeBySlot[`${day}-${period}`];
   if (f && f.ids.includes(stu.id)) return { kind: "study", room: f.room };
   if (f && f.activity) return { kind: "activity", activity: f.activity };
