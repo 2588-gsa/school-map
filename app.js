@@ -25,7 +25,8 @@ const state = {
   selectedId: null,    // 선택한 공간 id
   person: null,        // 검색한 선생님/학생/반 { kind, id }
   highlightId: null,   // 사람 검색 결과로 지도에서 강조할 교실
-  timeOverride: null,  // 시간 바꿔보기 { day, period } (null이면 지금 시각)
+  timeOverride: null,  // 시간 바꿔보기 { date, period } (null이면 지금 시각)
+  viewDay: null,       // 시간표에서 고른 요일 탭 (null이면 오늘)
   reports: [],         // 최신순으로 정렬된 제보 목록
   draft: { roomId: null, status: null, note: "" },   // 작성 중인 제보 (다시 그려도 유지)
   edit: new URLSearchParams(location.search).get("edit") === "1"
@@ -465,67 +466,127 @@ function buildForm(room) {
   return form;
 }
 
-// ----- 8-1. 시간표 화면 -----
-const PERSON_LABEL = { teacher: "선생님", student: "학생", class: "1학년 반" };
+// ----- 8-1. 시간표 화면: 공간 ↔ 수업 ↔ 선생님 ↔ 학생 을 서로 링크로 연결 -----
+const PERSON_LABEL = { teacher: "선생님", student: "학생", class: "1학년 반", session: "수업" };
+const WEEKDAYS = ["월", "화", "수", "목", "금"];
 
-// 수업 하나를 "과목 · 선생님 · 교실" 한 줄로 (교실이 지도에 있으면 누를 수 있게)
-function sessionLine(s, showTeacher = true) {
-  const line = el("div", { class: "tt-line" });
-  line.appendChild(el("b", {}, s.title));
-  if (showTeacher && s.teachers.length) line.appendChild(el("span", { class: "tt-sub" }, " · " + s.teachers.join(", ")));
-  line.appendChild(roomLink(s.room));
-  return line;
-}
-function roomLink(text) {
-  if (!text) return el("span", { class: "tt-sub" }, " · 교실 미정");
-  const r = resolveRoom(text);
-  if (!r) return el("span", { class: "tt-sub" }, " · " + text);
-  const label = /^\d/.test(r.name) ? `${buildingById(r.building).name} ${r.name}` : r.name;
-  const a = el("a", { class: "tt-room", href: "#" }, " · 📍" + label);
-  a.addEventListener("click", (e) => { e.preventDefault(); goToRoom(r.id); });
+// 누르면 이동하는 글자
+function link(text, onClick, cls = "tt-link") {
+  const a = el("a", { class: cls, href: "#" }, text);
+  a.addEventListener("click", (e) => { e.preventDefault(); onClick(); });
   return a;
 }
+function personLink(kind, id, label) { return link(label || id, () => openPerson(kind, id)); }
+function sessionLink(x) { return link(x.title, () => openPerson("session", sessionId(x)), "tt-link strong"); }
+function roomLink(text) {
+  if (!text) return el("span", { class: "tt-sub" }, "교실 미정");
+  const r = resolveRoom(text);
+  if (!r) return el("span", { class: "tt-sub" }, text);
+  return link("📍" + roomLabel(r), () => goToRoom(r.id), "tt-room");
+}
+function roomLabel(r) { return /^\d/.test(r.name) ? `${buildingById(r.building).name} ${r.name}` : r.name; }
+function teacherLinks(x) {
+  const span = el("span", { class: "tt-sub" });
+  x.teachers.forEach((t, i) => {
+    if (i) span.appendChild(document.createTextNode(", "));
+    span.appendChild(t === "원어민" ? document.createTextNode(t) : personLink("teacher", t, t));
+  });
+  return span;
+}
+// 사이에 " · " 를 넣어 이어 붙이기
+function joinParts(parent, parts) {
+  parts.filter(Boolean).forEach((p, i) => {
+    if (i) parent.appendChild(el("span", { class: "tt-sep" }, " · "));
+    parent.appendChild(p);
+  });
+  return parent;
+}
+// 수업 한 줄: 수업 · 선생님 · 교실 (보여 줄 것만)
+function sessionLine(x, { teacher = true, room = true } = {}) {
+  return joinParts(el("div", { class: "tt-line" }), [
+    sessionLink(x), teacher && x.teachers.length ? teacherLinks(x) : null, room ? roomLink(x.room) : null
+  ]);
+}
 
-// 교실 패널 위쪽: 지금 이 교실 수업 + 오늘 시간표
+// 요일 탭
+function viewDay(slot) { return state.viewDay || (WEEKDAYS.includes(slot.day) ? slot.day : "월"); }
+function dayTabs(slot) {
+  const box = el("div", { class: "day-tabs" });
+  const cur = viewDay(slot);
+  WEEKDAYS.forEach((d) => {
+    const b = el("button", { class: d === cur ? "on" : "" }, d);
+    b.addEventListener("click", () => { state.viewDay = d; renderPanel(); });
+    box.appendChild(b);
+  });
+  return box;
+}
+function slotOn(slot, day, period) {
+  return { day, period, date: dateOfWeekday(slot.date, day), inClass: true };
+}
+// 요일별 시간표 표: rowFn(slot) → 그 교시 칸에 넣을 요소(없으면 null)
+function weekTable(slot, title, rowFn) {
+  const wrap = el("div", { class: "history" });
+  wrap.appendChild(el("h3", {}, title));
+  wrap.appendChild(dayTabs(slot));
+  const day = viewDay(slot);
+  TIMETABLE.periods.forEach((p) => {
+    const isNow = slot.inClass && slot.day === day && slot.period === p.p;
+    const row = el("div", { class: "tt-row" + (isNow ? " now" : "") });
+    row.appendChild(el("span", { class: "tt-p" }, p.p + "교시"));
+    const cell = rowFn(slotOn(slot, day, p.p));
+    row.appendChild(cell || el("span", { class: "tt-empty" }, "—"));
+    wrap.appendChild(row);
+  });
+  return wrap;
+}
+
+// ===== 공간을 눌렀을 때 =====
 function roomScheduleBox(room) {
   const slot = currentSlot(state.timeOverride);
+  const frag = el("div");
   const box = el("div", { class: "tt-box" });
   box.appendChild(el("div", { class: "tt-head" }, "🕒 " + slot.label));
   if (slot.inClass) {
     const { list, study } = roomAt(room.id, slot);
-    if (list.length) list.forEach((s) => box.appendChild(sessionLine(s)));
-    else if (study) box.appendChild(el("div", { class: "tt-line" }, `공강 자습실 (${study.ids.length}명)`));
-    else box.appendChild(el("div", { class: "tt-empty" }, "시간표상 지금 이 교실에서 하는 수업이 없어요."));
-  }
-  // 오늘 이 교실 시간표
-  if (DAY_NAMES.indexOf(slot.day) >= 1 && DAY_NAMES.indexOf(slot.day) <= 5) {
-    const rows = dayRows(slot, (sl) => roomAt(room.id, sl));
-    const used = rows.filter((r) => r.value.list.length || r.value.study);
-    const det = el("details", {});
-    det.appendChild(el("summary", {}, `${mdLabel(slot.date, slot.day)} 이 교실 시간표 (${used.length}교시 사용)`));
-    rows.forEach((r) => {
-      const v = r.value;
-      const txt = v.list.length ? v.list.map((s) => s.title).join(", ")
-                : v.study ? `공강 자습 (${v.study.ids.length}명)` : "—";
-      const row = el("div", { class: "tt-row" + (r.period === slot.period ? " now" : "") });
-      row.appendChild(el("span", { class: "tt-p" }, r.period + "교시"));
-      row.appendChild(el("span", {}, txt));
-      det.appendChild(row);
+    if (list.length) list.forEach((x) => {
+      box.appendChild(sessionLine(x, { room: false }));
+      box.appendChild(studentsLine(x));
     });
-    box.appendChild(det);
+    else if (study) box.appendChild(el("div", { class: "tt-line" }, `공강 자습실 (${study.ids.length}명)`));
+    else box.appendChild(el("div", { class: "tt-empty" }, "지금 이 공간에서 하는 수업이 없어요."));
   }
-  box.appendChild(el("div", { class: "tt-note" }, "※ 시간표에 교실이 적힌 수업만 표시돼요."));
-  return box;
+  frag.appendChild(box);
+  frag.appendChild(weekTable(slot, "이 공간 시간표", (sl) => {
+    const { list, study } = roomAt(room.id, sl);
+    if (!list.length && !study) return null;
+    const cell = el("span", { class: "tt-cell" });
+    list.forEach((x, i) => {
+      if (i) cell.appendChild(el("br"));
+      joinParts(cell, [sessionLink(x), x.teachers.length ? teacherLinks(x) : null]);
+    });
+    if (!list.length && study) cell.appendChild(document.createTextNode(`공강 자습 (${study.ids.length}명)`));
+    return cell;
+  }));
+  return frag;
+}
+// "학생 23명" → 누르면 그 수업 화면
+function studentsLine(x) {
+  const n = (TT.studentsOf[sessionId(x)] || []).length;
+  const line = el("div", { class: "tt-line tt-sub" });
+  if (n) line.appendChild(link(`👥 학생 ${n}명 보기`, () => openPerson("session", sessionId(x))));
+  else if (/^1-\d반$/.test(x.group)) line.appendChild(personLink("class", x.group, `👥 ${x.group} 시간표`));
+  return line;
 }
 
-// 선생님/학생/반을 검색했을 때
+// ===== 선생님 / 학생 / 반 / 수업을 열 때 =====
 function openPerson(kind, id) {
   state.person = { kind, id };
   state.selectedId = null;
   state.highlightId = null;
   // 지금 있는 교실을 알면 지도에서 그 층으로 이동해서 강조
-  const now = personNow(kind, id, currentSlot(state.timeOverride));
-  const r = now.room ? resolveRoom(now.room) : null;
+  const slot = currentSlot(state.timeOverride);
+  const roomText = kind === "session" ? findSession(id).room : personNow(kind, id, slot).room;
+  const r = roomText ? resolveRoom(roomText) : null;
   if (r) {
     state.view = "building"; state.buildingId = r.building; state.floor = r.floor; state.highlightId = r.id;
   }
@@ -534,71 +595,103 @@ function openPerson(kind, id) {
 
 function findStudent(id) { return TT.students.find((s) => (s.id || s.name) === id); }
 
-// 지금 어디서 무엇을 하는지 → { text, sessions, room }
+// 그 시간에 어디서 무엇을 하는지 → { text, sessions, room }
 function personNow(kind, id, slot) {
   if (!slot.inClass) return { text: slot.label, sessions: [], room: null };
-  if (kind === "teacher") {
-    const list = teacherAt(id, slot);
-    return list.length ? { sessions: list, room: list[0].room } : { text: "지금은 수업이 없어요.", sessions: [], room: null };
+  if (kind === "teacher" || kind === "class") {
+    const list = kind === "teacher" ? teacherAt(id, slot) : classAt(id, slot);
+    return list.length ? { sessions: list, room: list[0].room } : { text: "수업 없음", sessions: [], room: null };
   }
-  if (kind === "class") {
-    const list = classAt(id, slot);
-    return list.length ? { sessions: list, room: list[0].room } : { text: "지금은 수업이 없어요.", sessions: [], room: null };
-  }
-  const st = findStudent(id);
-  const v = studentAt(st, slot);
+  const v = studentAt(findStudent(id), slot);
   if (v.kind === "class") return { sessions: v.sessions, room: v.sessions[0].room };
   if (v.kind === "study") return { text: v.text || "공강 · 자습", sessions: [], room: v.room || null };
   if (v.kind === "activity") return { text: v.activity, sessions: [], room: null };
-  return { text: "지금은 수업이 없어요.", sessions: [], room: null };
+  return { text: "수업 없음", sessions: [], room: null };
 }
 
 function renderPersonPanel(panel) {
   const { kind, id } = state.person;
+  if (kind === "session") return renderSessionPanel(panel, findSession(id));
   const slot = currentSlot(state.timeOverride);
   const st = kind === "student" ? findStudent(id) : null;
   panel.appendChild(el("h2", {}, kind === "teacher" ? `${id} 선생님` : st ? st.name : id));
-  panel.appendChild(el("div", { class: "meta" }, st && st.id ? `${st.id[0]}학년 학생 · ${st.id}` : PERSON_LABEL[kind]));
+  const meta = st && st.id ? `${st.id[0]}학년 학생 · ${st.id}`
+    : kind === "teacher" ? `담당 수업 주 ${(TT.teachers[id] || []).length}시간` : PERSON_LABEL[kind];
+  panel.appendChild(el("div", { class: "meta" }, meta));
 
   // 지금
   const box = el("div", { class: "tt-box" });
   box.appendChild(el("div", { class: "tt-head" }, "🕒 " + slot.label));
-  const now = personNow(kind, id, slot);
   if (slot.inClass) {
-    if (now.sessions.length) now.sessions.forEach((s) => box.appendChild(sessionLine(s, kind !== "teacher")));
-    else {
-      const line = el("div", { class: "tt-line" });
-      line.appendChild(el("b", {}, now.text));
-      if (now.room) line.appendChild(roomLink(now.room));
-      box.appendChild(line);
-    }
+    const now = personNow(kind, id, slot);
+    if (now.sessions.length) now.sessions.forEach((x) => {
+      box.appendChild(sessionLine(x, { teacher: kind !== "teacher" }));
+      if (kind === "teacher") box.appendChild(studentsLine(x));
+    });
+    else box.appendChild(joinParts(el("div", { class: "tt-line" }),
+      [el("b", {}, now.text), now.room ? roomLink(now.room) : null]));
   }
   panel.appendChild(box);
 
-  // 하루 시간표
-  const weekday = DAY_NAMES.indexOf(slot.day) >= 1 && DAY_NAMES.indexOf(slot.day) <= 5;
-  const day = weekday ? slot.day : "월";
-  const hist = el("div", { class: "history" });
-  hist.appendChild(el("h3", {}, weekday ? `${mdLabel(slot.date, day)} 시간표` : "월요일 시간표 (정규 수업)"));
-  TIMETABLE.periods.forEach((p) => {
-    const v = personNow(kind, id, { day, date: weekday ? slot.date : "", period: p.p, inClass: true });
-    const row = el("div", { class: "tt-row" + (slot.inClass && p.p === slot.period ? " now" : "") });
-    row.appendChild(el("span", { class: "tt-p" }, p.p + "교시"));
-    const cell = el("span", {});
+  // 요일별 시간표
+  panel.appendChild(weekTable(slot, "시간표", (sl) => {
+    const v = personNow(kind, id, sl);
+    const cell = el("span", { class: "tt-cell" });
     if (v.sessions.length) {
-      v.sessions.forEach((s, i) => {
-        if (i) cell.appendChild(document.createTextNode(" / "));
-        cell.appendChild(document.createTextNode(s.title + (kind === "teacher" ? "" : s.teachers.length ? ` (${s.teachers.join(", ")})` : "")));
-        cell.appendChild(roomLink(s.room));
+      v.sessions.forEach((x, i) => {
+        if (i) cell.appendChild(el("br"));
+        joinParts(cell, [sessionLink(x), kind !== "teacher" && x.teachers.length ? teacherLinks(x) : null, roomLink(x.room)]);
       });
-    } else {
-      cell.appendChild(document.createTextNode(v.text === "지금은 수업이 없어요." ? "—" : v.text));
-      if (v.room) cell.appendChild(roomLink(v.room));
+      return cell;
     }
-    row.appendChild(cell);
-    hist.appendChild(row);
-  });
-  panel.appendChild(hist);
+    if (v.text === "수업 없음") return null;
+    joinParts(cell, [document.createTextNode(v.text), v.room ? roomLink(v.room) : null]);
+    return cell;
+  }));
+}
+
+// ===== 수업을 눌렀을 때: 언제 · 어디서 · 누가 가르치고 · 누가 듣는지 =====
+function renderSessionPanel(panel, x) {
+  panel.appendChild(el("h2", {}, x.title));
+  const p = TIMETABLE.periods.find((q) => q.p === x.period);
+  const when = x.date ? `${mdLabel(x.date, x.day || DAY_NAMES[new Date(x.date + "T00:00").getDay()])}` : `매주 ${x.day}요일`;
+  panel.appendChild(el("div", { class: "meta" }, `${when} ${x.period}교시 (${p.start}~${p.end}) · ${x.group}`));
+
+  const box = el("div", { class: "tt-box" });
+  box.appendChild(joinParts(el("div", { class: "tt-line" }), [el("b", {}, "장소"), roomLink(x.room)]));
+  if (x.teachers.length) box.appendChild(joinParts(el("div", { class: "tt-line" }), [el("b", {}, "선생님"), teacherLinks(x)]));
+  panel.appendChild(box);
+
+  // 같은 수업의 다른 시간
+  const order = (y) => y.date ? y.date + y.period : WEEKDAYS.indexOf(y.day) * 10 + y.period;
+  const same = (x.date ? TT.extra : TT.sessions).filter((y) => y.title === x.title && y !== x)
+    .sort((a, b) => (order(a) > order(b) ? 1 : -1));
+  if (same.length) {
+    const other = el("div", { class: "history" });
+    other.appendChild(el("h3", {}, "같은 수업의 다른 시간"));
+    same.forEach((y) => {
+      const row = el("div", { class: "tt-row" });
+      row.appendChild(el("span", { class: "tt-p wide" }, y.date ? `${mdLabel(y.date, DAY_NAMES[new Date(y.date + "T00:00").getDay()])} ${y.period}교시` : `${y.day} ${y.period}교시`));
+      row.appendChild(joinParts(el("span", { class: "tt-cell" }), [link("열기", () => openPerson("session", sessionId(y))), teacherLinks(y), roomLink(y.room)]));
+      other.appendChild(row);
+    });
+    panel.appendChild(other);
+  }
+
+  // 듣는 학생
+  const list = TT.studentsOf[sessionId(x)] || [];
+  const stu = el("div", { class: "history" });
+  if (list.length) {
+    stu.appendChild(el("h3", {}, `듣는 학생 ${list.length}명`));
+    const grid = el("div", { class: "stu-grid" });
+    [...list].sort((a, b) => (a.id || "").localeCompare(b.id || "")).forEach((s) =>
+      grid.appendChild(personLink("student", s.id || s.name, s.name)));
+    stu.appendChild(grid);
+  } else if (/^1-\d반$/.test(x.group)) {
+    stu.appendChild(el("h3", {}, "듣는 학생"));
+    stu.appendChild(personLink("class", x.group, `${x.group} 전체 (반 시간표 보기)`));
+  }
+  panel.appendChild(stu);
 }
 
 // 시간 바꿔보기 (테스트·발표용): 날짜와 교시를 고르면 그 시간 기준으로 보여 줌
@@ -616,6 +709,7 @@ function setupTimeBox() {
   const apply = () => {
     const pick = mode.value === "pick" && dateIn.value;
     state.timeOverride = pick ? { date: dateIn.value, period: Number(perSel.value) } : null;
+    state.viewDay = null;   // 기준 시간을 바꾸면 그 날 요일 탭으로
     dateIn.classList.toggle("hidden", mode.value !== "pick");
     perSel.classList.toggle("hidden", mode.value !== "pick");
     if (state.person) openPerson(state.person.kind, state.person.id); else renderAll();
@@ -799,8 +893,7 @@ function start() {
     showToast("Firebase 연결 실패 → 로컬 모드로 실행", true);
     store = makeLocalStore();
   }
-  $("modeBadge").textContent = store.mode === "firebase"
-    ? "🟢 공유 모드 (모두에게 보임)" : "🟡 로컬 테스트 모드 (이 브라우저에만 저장)";
+  if (store.mode !== "firebase") console.log("로컬 테스트 모드: 제보가 이 브라우저에만 저장돼요.");
 
   $("backBtn").addEventListener("click", goCampus);
   setupSearch();

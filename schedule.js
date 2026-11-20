@@ -39,7 +39,18 @@ function loadTimetable(data) {
     ({ id, name, sessions: idx.map((n) => TT.sessions[n]), extra: (eidx || []).map((n) => TT.extra[n]),
        personal: (personal || []).map(([day, period, text, room]) => ({ day, period, text, room })) }));
   data.free.forEach((f) => { TT.freeBySlot[`${f.day}-${f.period}`] = f; });
+  // 수업 → 듣는 학생 (수업을 누르면 학생 목록을 보여 주려고)
+  TT.studentsOf = {};
+  TT.students.forEach((st) => [...st.sessions, ...st.extra].forEach((x) =>
+    (TT.studentsOf[sessionId(x)] ||= []).push(st)));
   HAS_TT = true;
+}
+
+// 수업 id: 정규 수업 "s12", 방과후 "x3"
+function sessionId(x) { return (x.date ? "x" : "s") + x.i; }
+function findSession(id) {
+  const n = Number(id.slice(1));
+  return id[0] === "x" ? TT.extra[n] : TT.sessions[n];
 }
 
 function unloadTimetable() {   // 로그아웃하면 메모리에서 지움
@@ -86,6 +97,14 @@ function currentSlot(override) {
   if (!upcoming.length) return { day, date, period: null, inClass: false, label: `${mdLabel(date, day)} · 오늘 일과가 끝났어요` };
   return { day, date, period: null, inClass: false,
            label: `${mdLabel(date, day)} · 쉬는 시간 (다음 ${upcoming[0].name} ${upcoming[0].start} 시작)` };
+}
+
+// 같은 주의 다른 요일 날짜 (요일 탭에서 방과후를 찾을 때 씀)
+function dateOfWeekday(baseDate, day) {
+  const [y, m, d] = baseDate.split("-").map(Number);
+  const base = new Date(y, m - 1, d);
+  base.setDate(base.getDate() + DAY_NAMES.indexOf(day) - base.getDay());
+  return ymd(base);
 }
 
 // ----- 3. 시간표의 교실 이름 → 지도 공간 -----

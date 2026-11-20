@@ -129,3 +129,16 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .modal .primary { padding: 10px; }
 .modal-x { position: absolute; top: 10px; right: 10px; border: none; background: none; font-size: 16px; color: #888; }
 .link-btn { border: none; background: none; color: #888; text-decoration: underline; font-size: 13px; }
+
+/* 연결 링크 · 요일 탭 */
+.tt-link { color: #2f6fd6; text-decoration: none; }
+.tt-link.strong { font-weight: bold; color: #1f3a5f; }
+.tt-link:hover, .tt-room:hover { text-decoration: underline; }
+.tt-sep { color: #aab; }
+.tt-cell { line-height: 1.6; }
+.tt-p.wide { width: 92px; }
+.day-tabs { display: flex; gap: 4px; margin: 0 0 6px; }
+.day-tabs button { flex: 1; padding: 5px 0; font-size: 13px; }
+.day-tabs button.on { background: #1f3a5f; color: #fff; border-color: #1f3a5f; }
+.stu-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 8px; font-size: 13px; }
+.stu-grid a { padding: 3px 0; }
