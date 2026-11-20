@@ -339,7 +339,8 @@ function renderPanel() {
   const b = buildingById(room.building);
   panel.appendChild(el("h2", {}, room.name));
   panel.appendChild(el("div", { class: "meta" }, `${b.name} ${room.floor}층 · ${room.type}`));
-  if (HAS_TT) panel.appendChild(roomScheduleBox(room));
+  const isDorm = room.building === "DM" || room.building === "DW";
+  if (HAS_TT) panel.appendChild(isDorm ? dormBox(room) : roomScheduleBox(room));
 
   // 현재 상태
   const a = analyze(room.id);
@@ -569,6 +570,23 @@ function roomScheduleBox(room) {
   }));
   return frag;
 }
+// 기숙사 방: 사는 학생 (로그인한 사람만 받는 비공개 데이터)
+function dormBox(room) {
+  const box = el("div", { class: "tt-box" });
+  box.appendChild(el("div", { class: "tt-head" }, "🛏 이 방 학생"));
+  const occ = TT.dorm[room.id] || [];
+  if (!occ.length) box.appendChild(el("div", { class: "tt-empty" }, "배정 정보가 없어요. (지금은 2학년만 있어요)"));
+  occ.forEach(([id, name]) => {
+    // 학번이 없는 학생(예: 복학생)은 이름으로 찾음
+    const key = id || (TT.students.some((x) => !x.id && x.name === name) ? name : "");
+    const line = el("div", { class: "tt-line" });
+    line.appendChild(key ? personLink("student", key, id ? `${name} (${showId(id)})` : name)
+                         : el("span", {}, name + " (학번 확인 필요)"));
+    box.appendChild(line);
+  });
+  return box;
+}
+
 // "학생 23명" → 누르면 그 수업 화면
 function studentsLine(x) {
   const n = (TT.studentsOf[sessionId(x)] || []).length;
@@ -615,9 +633,14 @@ function renderPersonPanel(panel) {
   const slot = currentSlot(state.timeOverride);
   const st = kind === "student" ? findStudent(id) : null;
   panel.appendChild(el("h2", {}, kind === "teacher" ? `${id} 선생님` : st ? st.name : id));
-  const meta = st && st.id ? `${st.id[0]}학년 학생 · ${st.id}`
+  const meta = st && st.id ? `${st.id[0]}학년 학생 · ${showId(st.id)}`
     : kind === "teacher" ? `담당 수업 주 ${(TT.teachers[id] || []).length}시간` : PERSON_LABEL[kind];
   panel.appendChild(el("div", { class: "meta" }, meta));
+  if (st && TT.dormOf[st.id]) {
+    const r = roomById(TT.dormOf[st.id]);
+    if (r) panel.appendChild(joinParts(el("div", { class: "tt-line dorm-line" }),
+      [document.createTextNode("🛏 기숙사"), link(`${buildingById(r.building).name} ${r.name}`, () => goToRoom(r.id), "tt-room")]));
+  }
 
   // 지금
   const box = el("div", { class: "tt-box" });

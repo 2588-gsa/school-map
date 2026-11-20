@@ -1,6 +1,6 @@
 // =============================================================
 //  로그인 (Firebase Authentication)
-//  - 아이디: 학생은 학번(예: 20101), 선생님은 이름(예: 김은석)
+//  - 아이디: 학생은 학번(예: 2101), 선생님은 이름(예: 김은석)
 //  - 처음 비밀번호는 1234 → 처음 로그인하면 바로 바꾸게 함
 //  - "로그인 유지"를 켜면 브라우저를 닫아도 자동 로그인
 //  - 시간표는 명단에 있는 사람이 로그인했을 때만 Firestore에서 받아 옴
@@ -34,7 +34,7 @@ function infoFromUser(user) {
   const id = user.email.split("@")[0];
   if (id === "admin") return { id, kind: "admin", name: "관리자" };
   if (id.startsWith("t")) return { id, kind: "teacher", name: decodeTeacher(id) + " 선생님" };
-  return { id, kind: "student", name: id };   // 이름은 시간표를 받은 뒤 채움
+  return { id, kind: "student", name: showId(id) };   // 이름은 시간표를 받은 뒤 채움
 }
 
 const mustChangeKey = (uid) => "mustChangePw:" + uid;
@@ -119,7 +119,7 @@ function showLoginModal() {
   openModal((box) => {
     box.appendChild(el("h2", {}, "로그인"));
     box.appendChild(el("p", { class: "modal-help" },
-      "학생은 학번(예: 20101), 선생님은 이름으로 로그인해요. 처음 비밀번호는 1234예요."));
+      "학생은 학번(예: 2101), 선생님은 이름으로 로그인해요. 처음 비밀번호는 1234예요."));
     const idIn = el("input", { type: "text", placeholder: "학번 또는 선생님 이름", autocomplete: "username" });
     const pwIn = el("input", { type: "password", placeholder: "비밀번호", autocomplete: "current-password" });
     const keepLb = el("label", { class: "keep" });
@@ -202,7 +202,7 @@ function setupAuth() {
         loadTimetable(await fetchTimetable());
         if (auth.info.kind === "student") {
           const st = TT.students.find((s) => s.id === auth.info.id);
-          if (st) auth.info.name = `${st.name} (${st.id})`;
+          if (st) auth.info.name = `${st.name} (${showId(st.id)})`;
         }
       } catch (e) {
         if (String(e.code || e.message).includes("permission")) {
