@@ -187,12 +187,16 @@ function renderUserBox() {
 
 // ----- 시작 -----
 function setupAuth() {
-  if (store.mode !== "firebase") { auth.ready = true; renderUserBox(); updateSearchPlaceholder(); return; }
+  if (store.mode !== "firebase") {
+    auth.ready = true; renderUserBox(); updateSearchPlaceholder();
+    store.myVotes().then((m) => { state.myVotes = m; renderPanel(); });
+    return;
+  }
   firebase.auth().onAuthStateChanged(async (user) => {
     auth.user = user;
     auth.info = user ? infoFromUser(user) : null;
     unloadTimetable();
-    state.person = null; state.highlightId = null;
+    state.person = null; state.highlightId = null; state.myVotes = {};
     if (user && auth.pendingDefault === user.email) {
       try { localStorage.setItem(mustChangeKey(user.uid), "1"); } catch (e) {}
       auth.pendingDefault = null;
@@ -214,6 +218,7 @@ function setupAuth() {
         }
         showToast(e.message, true);
       }
+      try { state.myVotes = await store.myVotes(); } catch (e) { state.myVotes = {}; }
       let must = false;
       try { must = !!localStorage.getItem(mustChangeKey(user.uid)); } catch (e) {}
       if (must) showChangePwModal(true);

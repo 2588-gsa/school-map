@@ -144,3 +144,10 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .stu-grid a { padding: 3px 0; }
 .dorm-line { margin: -6px 0 10px; font-size: 13px; }
 #map .decor.kind-etc { fill: #e9ecef; stroke: #cfd4da; }
+
+/* 제보 의견 */
+.vote-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.vote-row button { flex: 1; }
+.voted { font-size: 13px; color: #556; }
+.warn.soft { background: #f3f4f6; color: #666; }
+.status-choices label:last-child { grid-column: span 2; }

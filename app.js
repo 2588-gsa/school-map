@@ -10,8 +10,11 @@ const STATUS = {
   available: { label: "사용 가능",   color: "#4caf72", staleMin: 180 },
   in_use:    { label: "사용 중",     color: "#f0b429", staleMin: 120 },
   broken:    { label: "기자재 이상", color: "#e25c5c", staleMin: 72 * 60 },
-  closed:    { label: "이용 불가",   color: "#8e6bd6", staleMin: 24 * 60 }
+  closed:    { label: "이용 불가",   color: "#8e6bd6", staleMin: 24 * 60 },
+  other:     { label: "기타",        color: "#5b8fb9", staleMin: 6 * 60 }   // 설명 필수
 };
+// "아닌 것 같아요"가 이만큼 이상이고 "지금도 맞아요"보다 많으면 믿기 어려운 정보로 표시
+const DOUBT_MIN = 2;
 const NO_INFO_COLOR = "#ffffff";
 const LOOKBACK_DAYS = 3;   // 최근 며칠치 제보만 불러올지 (읽기 횟수 절약)
 const CONFLICT_MIN = 60;   // 최신 제보 기준 몇 분 안의 "다른 상태" 제보를 충돌로 볼지
@@ -28,7 +31,8 @@ const state = {
   timeOverride: null,  // 시간 바꿔보기 { date, period } (null이면 지금 시각)
   viewDay: null,       // 시간표에서 고른 요일 탭 (null이면 오늘)
   reports: [],         // 최신순으로 정렬된 제보 목록
-  draft: { roomId: null, status: null, note: "" },   // 작성 중인 제보 (다시 그려도 유지)
+  draft: { roomId: null, status: null, note: "" },
+  myVotes: {},         // 내가 의견을 남긴 제보 { 제보 id: "confirm" | "dispute" }   // 작성 중인 제보 (다시 그려도 유지)
   edit: new URLSearchParams(location.search).get("edit") === "1"
 };
 
@@ -46,8 +50,10 @@ function isConfigured() {
 
 function makeFirebaseStore() {
   firebase.initializeApp(FIREBASE_CONFIG);
-  const col = firebase.firestore().collection("reports");
+  const db = firebase.firestore();
+  const col = db.collection("reports");
   const FV = firebase.firestore.FieldValue;
+  const toDate = (t) => (t ? t.toDate() : null);
 
   return {
     mode: "firebase",
@@ -60,49 +66,63 @@ function makeFirebaseStore() {
             // 방금 등록해서 서버 시각이 아직 없으면 예상 시각을 사용
             const d = doc.data({ serverTimestamps: "estimate" });
             return {
-              id: doc.id,
-              spaceId: d.spaceId,
-              status: d.status,
-              note: d.note || "",
-              createdAt: d.createdAt ? d.createdAt.toDate() : new Date(),
-              confirms: d.confirms || 0,
-              lastConfirmedAt: d.lastConfirmedAt ? d.lastConfirmedAt.toDate() : null
+              id: doc.id, spaceId: d.spaceId, status: d.status, note: d.note || "",
+              createdAt: toDate(d.createdAt) || new Date(),
+              confirms: d.confirms || 0, lastConfirmedAt: toDate(d.lastConfirmedAt),
+              disputes: d.disputes || 0, lastDisputedAt: toDate(d.lastDisputedAt)
             };
           });
           callback(list);
         }, (err) => showToast("불러오기 실패: " + err.message, true));
     },
+    // 제보 + 제보자 기록(관리자만 볼 수 있음)을 한 번에 저장
     add(r) {
-      return col.add({
+      const ref = col.doc();
+      const batch = db.batch();
+      batch.set(ref, {
         spaceId: r.spaceId, status: r.status, note: r.note,
         createdAt: FV.serverTimestamp(),   // 기기 시계가 아니라 서버 시각
-        confirms: 0
+        confirms: 0, disputes: 0
+      });
+      batch.set(db.collection("reportAuthors").doc(ref.id), { by: auth.info.id });
+      return batch.commit();
+    },
+    // 의견: "confirm"(지금도 맞아요) / "dispute"(아닌 것 같아요). 한 사람당 제보 하나에 한 번
+    vote(id, type) {
+      const batch = db.batch();
+      batch.update(col.doc(id), type === "confirm"
+        ? { confirms: FV.increment(1), lastConfirmedAt: FV.serverTimestamp() }
+        : { disputes: FV.increment(1), lastDisputedAt: FV.serverTimestamp() });
+      batch.set(db.collection("votes").doc(`${id}_${auth.info.id}`),
+        { report: id, by: auth.info.id, type, at: FV.serverTimestamp() });
+      return batch.commit().catch((e) => {
+        if (String(e.code || e.message).includes("permission")) throw new Error("이미 의견을 남긴 제보예요.");
+        throw e;
       });
     },
-    confirm(id) {
-      return col.doc(id).update({
-        confirms: FV.increment(1),
-        lastConfirmedAt: FV.serverTimestamp()
-      });
+    // 내가 의견을 남긴 제보들 { 제보 id: "confirm" | "dispute" }
+    async myVotes() {
+      if (!auth.info) return {};
+      const snap = await db.collection("votes").where("by", "==", auth.info.id).get();
+      const m = {};
+      snap.docs.forEach((d) => { const x = d.data(); m[x.report] = x.type; });
+      return m;
     }
   };
 }
 
 function makeLocalStore() {
-  const KEY = "campus-map-reports";
+  const KEY = "campus-map-reports", VKEY = "campus-map-votes";
   let listener = null;
-  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } };
-  const save = (arr) => { try { localStorage.setItem(KEY, JSON.stringify(arr)); } catch (e) {} };
+  const load = (k = KEY) => { try { return JSON.parse(localStorage.getItem(k)) || (k === KEY ? [] : {}); } catch (e) { return k === KEY ? [] : {}; } };
+  const save = (v, k = KEY) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const d = (x) => (x ? new Date(x) : null);
   const emit = () => {
     if (!listener) return;
-    const list = load().map((r) => ({
-      ...r,
-      createdAt: new Date(r.createdAt),
-      lastConfirmedAt: r.lastConfirmedAt ? new Date(r.lastConfirmedAt) : null
-    })).sort((a, b) => b.createdAt - a.createdAt);
-    listener(list);
+    listener(load().map((r) => ({ ...r, disputes: r.disputes || 0, createdAt: new Date(r.createdAt),
+      lastConfirmedAt: d(r.lastConfirmedAt), lastDisputedAt: d(r.lastDisputedAt) }))
+      .sort((a, b) => b.createdAt - a.createdAt));
   };
-
   return {
     mode: "local",
     subscribe(callback) {
@@ -112,18 +132,23 @@ function makeLocalStore() {
     },
     add(r) {
       const arr = load();
-      arr.push({ id: "L" + Date.now() + Math.random().toString(36).slice(2, 6),
-                 ...r, createdAt: new Date().toISOString(), confirms: 0, lastConfirmedAt: null });
+      arr.push({ id: "L" + Date.now() + Math.random().toString(36).slice(2, 6), ...r,
+                 createdAt: new Date().toISOString(), confirms: 0, disputes: 0 });
       save(arr); emit();
       return Promise.resolve();
     },
-    confirm(id) {
+    vote(id, type) {
+      const votes = load(VKEY);
+      if (votes[id]) return Promise.reject(new Error("이미 의견을 남긴 제보예요."));
       const arr = load();
       const r = arr.find((x) => x.id === id);
-      if (r) { r.confirms++; r.lastConfirmedAt = new Date().toISOString(); }
-      save(arr); emit();
+      if (r && type === "confirm") { r.confirms = (r.confirms || 0) + 1; r.lastConfirmedAt = new Date().toISOString(); }
+      if (r && type === "dispute") { r.disputes = (r.disputes || 0) + 1; r.lastDisputedAt = new Date().toISOString(); }
+      votes[id] = type;
+      save(arr); save(votes, VKEY); emit();
       return Promise.resolve();
-    }
+    },
+    async myVotes() { return load(VKEY); }
   };
 }
 
@@ -144,7 +169,10 @@ function analyze(spaceId) {
     r.status !== latest.status && (latest.createdAt - r.createdAt) / 60000 <= CONFLICT_MIN
   ).length;
 
-  return { latest, list, lastSeen, stale, conflicts };
+  // "아닌 것 같아요"가 많으면 믿기 어려운 정보
+  const doubtful = latest.disputes >= DOUBT_MIN && latest.disputes > latest.confirms;
+
+  return { latest, list, lastSeen, stale, conflicts, doubtful };
 }
 
 // ----- 5. 시간 표시 -----
@@ -285,7 +313,7 @@ function renderMap() {
         const a = analyze(room.id);
         const rect = svgShape(room, "room");
         rect.setAttribute("fill", a ? STATUS[a.latest.status].color : NO_INFO_COLOR);
-        if (a && a.stale) rect.classList.add("stale");
+        if (a && (a.stale || a.doubtful)) rect.classList.add("stale");
         if (room.id === state.selectedId || room.id === state.highlightId) rect.classList.add("selected");
         rect.addEventListener("click", () => { if (!state.edit) selectRoom(room.id); });
         svg.appendChild(rect);
@@ -340,7 +368,8 @@ function renderPanel() {
   panel.appendChild(el("h2", {}, room.name));
   panel.appendChild(el("div", { class: "meta" }, `${b.name} ${room.floor}층 · ${room.type}`));
   const isDorm = room.building === "DM" || room.building === "DW";
-  if (HAS_TT) panel.appendChild(isDorm ? dormBox(room) : roomScheduleBox(room));
+  if (isDorm) panel.appendChild(dormBox(room));
+  else if (HAS_TT) panel.appendChild(roomScheduleBox(room));
 
   // 현재 상태
   const a = analyze(room.id);
@@ -355,21 +384,19 @@ function renderPanel() {
     box.appendChild(el("div", { class: "big" }, s.label));
     box.appendChild(el("div", { class: "time" },
       `등록 ${timeAgo(a.latest.createdAt)} (${clock(a.latest.createdAt)})` +
-      (a.latest.confirms > 0 ? ` · ${a.latest.confirms}명 확인 (마지막 ${timeAgo(a.lastSeen)})` : "")));
+      (a.latest.confirms > 0 ? ` · 👍 ${a.latest.confirms}명 (마지막 ${timeAgo(a.lastSeen)})` : "") +
+      (a.latest.disputes > 0 ? ` · 👎 ${a.latest.disputes}명` : "")));
     if (a.latest.note) box.appendChild(el("div", { class: "note" }, a.latest.note));
     if (a.stale) box.appendChild(el("div", { class: "warn" },
       "⚠ 오래된 정보예요. 지금은 다를 수 있으니 직접 확인해 주세요."));
     if (a.conflicts > 0) box.appendChild(el("div", { class: "warn" },
       `⚠ 최근 ${CONFLICT_MIN}분 안에 다른 상태 제보가 ${a.conflicts}건 있어요.`));
+    if (a.doubtful) box.appendChild(el("div", { class: "warn" },
+      `⚠ ${a.latest.disputes}명이 "아닌 것 같아요"라고 했어요. 믿기 어려운 정보예요.`));
+    else if (a.latest.disputes > 0) box.appendChild(el("div", { class: "warn soft" },
+      `${a.latest.disputes}명이 "아닌 것 같아요"라고 했어요.`));
 
-    const cbtn = el("button", { style: "margin-top:8px" }, "👍 지금도 맞아요");
-    cbtn.addEventListener("click", () => {
-      cbtn.disabled = true;
-      store.confirm(a.latest.id)
-        .then(() => showToast("확인해 주셔서 고마워요!"))
-        .catch((e) => { showToast("실패: " + e.message, true); cbtn.disabled = false; });
-    });
-    if (canWrite()) box.appendChild(cbtn);
+    if (canWrite()) box.appendChild(voteButtons(a.latest));
     panel.appendChild(box);
   }
 
@@ -412,6 +439,37 @@ function renderRecentAll(panel) {
   panel.appendChild(hist);
 }
 
+// 제보에 대한 의견 버튼 (한 사람당 한 번)
+function voteButtons(rep) {
+  const wrap = el("div", { class: "vote-row" });
+  const mine = state.myVotes[rep.id];
+  if (mine) {
+    wrap.appendChild(el("span", { class: "voted" },
+      mine === "confirm" ? "👍 '지금도 맞아요'를 남겼어요" : "👎 '아닌 것 같아요'를 남겼어요"));
+    return wrap;
+  }
+  const make = (type, text) => {
+    const b = el("button", {}, text);
+    b.addEventListener("click", () => {
+      wrap.querySelectorAll("button").forEach((x) => { x.disabled = true; });
+      store.vote(rep.id, type)
+        .then(() => {
+          state.myVotes[rep.id] = type;
+          showToast(type === "confirm" ? "확인해 주셔서 고마워요!" : "의견을 남겼어요. 맞는 상태를 새로 알려 주면 더 좋아요.");
+          renderPanel();
+        })
+        .catch((e) => {
+          showToast(e.message, true);
+          if (e.message.includes("이미")) { state.myVotes[rep.id] = type; renderPanel(); }
+          else wrap.querySelectorAll("button").forEach((x) => { x.disabled = false; });
+        });
+    });
+    return b;
+  };
+  wrap.append(make("confirm", "👍 지금도 맞아요"), make("dispute", "👎 아닌 것 같아요"));
+  return wrap;
+}
+
 function buildForm(room) {
   const form = el("div", { class: "form" });
   form.appendChild(el("h3", {}, "상태 알리기"));
@@ -448,6 +506,7 @@ function buildForm(room) {
   btn.addEventListener("click", () => {
     const checked = form.querySelector("input[name=st]:checked");
     if (!checked) { showToast("상태를 하나 골라 주세요.", true); return; }
+    if (checked.value === "other" && !ta.value.trim()) { showToast("'기타'는 어떤 상황인지 설명을 꼭 적어 주세요.", true); ta.focus(); return; }
     const note = ta.value.trim().slice(0, NOTE_MAX);
 
     btn.disabled = true;
@@ -574,6 +633,17 @@ function roomScheduleBox(room) {
 function dormBox(room) {
   const box = el("div", { class: "tt-box" });
   box.appendChild(el("div", { class: "tt-head" }, "🛏 이 방 학생"));
+  // 방 배정은 비공개 데이터라 로그인해야 받을 수 있음
+  if (!HAS_TT) {
+    box.appendChild(el("div", { class: "tt-empty" }, "로그인하면 이 방에 사는 학생을 볼 수 있어요."));
+    if (store.mode === "firebase") box.appendChild(link("로그인하기", showLoginModal));
+    return box;
+  }
+  if (!TIMETABLE.dorm) {
+    box.appendChild(el("div", { class: "tt-empty" },
+      "기숙사 배정 데이터가 아직 없어요. 관리자 페이지에서 최신 timetable-data.json을 다시 올려 주세요."));
+    return box;
+  }
   const occ = TT.dorm[room.id] || [];
   if (!occ.length) box.appendChild(el("div", { class: "tt-empty" }, "배정 정보가 없어요. (지금은 2학년만 있어요)"));
   occ.forEach(([id, name]) => {

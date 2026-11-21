@@ -15,32 +15,70 @@ service cloud.firestore {
       return signedIn() &&
         loginId() in get(/databases/$(database)/documents/private/roster).data.ids;
     }
+    function docPath(coll, id) { return /databases/$(database)/documents/$(coll)/$(id); }
 
     // ---------- 공간 상태 제보 ----------
     match /reports/{reportId} {
       // 지도 상태는 누구나 볼 수 있음
       allow read: if true;
 
-      // 새 제보: 명단에 있는 사람만, 정해진 항목·값만
+      // 새 제보: 명단에 있는 사람만, 정해진 항목·값만, 제보자 기록(reportAuthors)과 함께
       allow create: if onRoster() &&
-        request.resource.data.keys().hasAll(['spaceId', 'status', 'note', 'createdAt', 'confirms']) &&
-        request.resource.data.keys().hasOnly(['spaceId', 'status', 'note', 'createdAt', 'confirms']) &&
+        request.resource.data.keys().hasAll(['spaceId', 'status', 'note', 'createdAt', 'confirms', 'disputes']) &&
+        request.resource.data.keys().hasOnly(['spaceId', 'status', 'note', 'createdAt', 'confirms', 'disputes']) &&
         request.resource.data.spaceId is string &&
         request.resource.data.spaceId.size() > 0 &&
         request.resource.data.spaceId.size() <= 40 &&
-        request.resource.data.status in ['available', 'in_use', 'broken', 'closed'] &&
+        request.resource.data.status in ['available', 'in_use', 'broken', 'closed', 'other'] &&
         request.resource.data.note is string &&
         request.resource.data.note.size() <= 200 &&
+        (request.resource.data.status != 'other' || request.resource.data.note.size() > 0) &&
         request.resource.data.createdAt == request.time &&
-        request.resource.data.confirms == 0;
+        request.resource.data.confirms == 0 &&
+        request.resource.data.disputes == 0 &&
+        existsAfter(docPath('reportAuthors', reportId));
 
-      // 수정: "지금도 맞아요"(확인 수 +1)만
+      // 의견: "지금도 맞아요"(confirms +1) 또는 "아닌 것 같아요"(disputes +1)
+      //  - 같은 사람이 같은 제보에 한 번만: votes/{제보id}_{아이디} 문서가 없던 상태에서 함께 만들어야 함
       allow update: if onRoster() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirms', 'lastConfirmedAt']) &&
-        request.resource.data.confirms == resource.data.confirms + 1 &&
-        request.resource.data.lastConfirmedAt == request.time;
+        !exists(docPath('votes', reportId + '_' + loginId())) &&
+        existsAfter(docPath('votes', reportId + '_' + loginId())) &&
+        (
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['confirms', 'lastConfirmedAt']) &&
+           request.resource.data.confirms == resource.data.get('confirms', 0) + 1 &&
+           request.resource.data.lastConfirmedAt == request.time)
+          ||
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disputes', 'lastDisputedAt']) &&
+           request.resource.data.disputes == resource.data.get('disputes', 0) + 1 &&
+           request.resource.data.lastDisputedAt == request.time)
+        );
 
-      // 삭제: 관리자만 (장난 제보 지우기)
+      // 삭제: 관리자만
+      allow delete: if isAdmin();
+    }
+
+    // ---------- 제보자 기록 (관리자만 봄) ----------
+    match /reportAuthors/{reportId} {
+      allow read: if isAdmin();
+      allow create: if onRoster() &&
+        request.resource.data.keys().hasOnly(['by']) &&
+        request.resource.data.by == loginId() &&
+        existsAfter(docPath('reports', reportId)) &&
+        !exists(docPath('reportAuthors', reportId));
+      allow delete: if isAdmin();
+    }
+
+    // ---------- 의견 기록 (1인 1표) ----------
+    match /votes/{voteId} {
+      // 내 의견만 볼 수 있음 (관리자는 전부)
+      allow read: if isAdmin() || (signedIn() && resource.data.by == loginId());
+      allow create: if onRoster() &&
+        request.resource.data.keys().hasOnly(['report', 'by', 'type', 'at']) &&
+        request.resource.data.by == loginId() &&
+        voteId == request.resource.data.report + '_' + loginId() &&
+        request.resource.data.type in ['confirm', 'dispute'] &&
+        request.resource.data.at == request.time &&
+        existsAfter(docPath('reports', request.resource.data.report));
       allow delete: if isAdmin();
     }
 

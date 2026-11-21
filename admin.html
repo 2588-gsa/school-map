@@ -5,71 +5,319 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>학교 통합 지도 - 관리자</title>
   <style>
-    * { box-sizing: border-box; font-family: 'Malgun Gothic', sans-serif; }
-    body { background: #f4f6f8; margin: 0; padding: 30px 16px; }
-    .box { max-width: 520px; margin: auto; background: #fff; border-radius: 14px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-    h1 { font-size: 20px; margin: 0 0 6px; }
-    h2 { font-size: 16px; margin: 22px 0 8px; }
+    * { box-sizing: border-box; font-family: 'Pretendard', 'Malgun Gothic', sans-serif; }
+    body { background: #f4f6f8; margin: 0; color: #222; }
+    header { background: #1f3a5f; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    header h1 { font-size: 18px; margin: 0; }
+    header .sp { margin-left: auto; font-size: 13px; }
+    main { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 2px 6px rgba(0,0,0,.06); margin-bottom: 16px; }
+    h2 { font-size: 16px; margin: 0 0 10px; }
     p { color: #555; font-size: 14px; line-height: 1.6; margin: 6px 0; }
-    input { width: 100%; padding: 10px; margin: 4px 0; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
-    button { padding: 10px 16px; border: none; border-radius: 8px; background: #2f6fd6; color: #fff; font-size: 14px; cursor: pointer; margin-top: 6px; }
-    button:disabled { opacity: .5; }
-    #log { white-space: pre-wrap; background: #f6f7f9; border-radius: 8px; padding: 10px; font-size: 13px; min-height: 40px; margin-top: 12px; }
-    .hidden { display: none; }
+    input, select { padding: 8px 10px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+    button { padding: 8px 14px; border: 1px solid #ccd; border-radius: 8px; background: #fff; font-size: 14px; cursor: pointer; }
+    button.primary { background: #2f6fd6; color: #fff; border-color: #2f6fd6; }
+    button.danger { background: #fff; color: #c0392b; border-color: #e3b5ae; }
+    button.danger:hover { background: #fdf0ee; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .hidden { display: none !important; }
+    .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+    .tabs button.on { background: #1f3a5f; color: #fff; border-color: #1f3a5f; }
+    .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; }
+    .stat { background: #f3f6fa; border-radius: 8px; padding: 6px 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 6px; border-bottom: 1px solid #eef0f3; text-align: left; vertical-align: top; }
+    th { background: #f7f8fa; font-weight: bold; color: #555; position: sticky; top: 0; }
+    td.note { max-width: 260px; white-space: pre-wrap; word-break: break-all; }
+    tr.doubt { background: #fff6f4; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+    .who { color: #2f6fd6; cursor: pointer; }
+    .who:hover { text-decoration: underline; }
+    .bulk { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+    #log { white-space: pre-wrap; background: #f6f7f9; border-radius: 8px; padding: 10px; font-size: 13px; min-height: 20px; margin-top: 10px; }
+    .muted { color: #999; }
   </style>
 </head>
 <body>
-<div class="box">
-  <h1>🔒 관리자 페이지</h1>
-  <p>시간표 데이터(timetable-data.json)를 Firestore에 올리는 곳이에요. 관리자 계정으로만 쓸 수 있어요.</p>
+<header>
+  <h1>🔒 학교 통합 지도 · 관리자</h1>
+  <span class="sp" id="who"></span>
+  <button id="logoutBtn" class="hidden">로그아웃</button>
+</header>
 
-  <div id="loginArea">
-    <h2>1. 관리자 로그인</h2>
-    <input id="pw" type="password" placeholder="관리자 비밀번호 (Firebase에서 admin 계정 만들 때 정한 것)">
-    <button id="loginBtn">로그인</button>
+<main>
+  <!-- 로그인 -->
+  <div class="card" id="loginArea">
+    <h2>관리자 로그인</h2>
+    <p>Firebase Authentication에서 만든 <b>admin@school-map.local</b> 계정의 비밀번호를 입력하세요.</p>
+    <input id="pw" type="password" placeholder="관리자 비밀번호" style="width:260px">
+    <button id="loginBtn" class="primary">로그인</button>
+    <div id="loginLog" class="muted" style="margin-top:8px"></div>
   </div>
 
-  <div id="uploadArea" class="hidden">
-    <h2>2. 시간표 데이터 올리기</h2>
-    <p>Claude가 보내준 <b>timetable-data.json</b> 파일을 고르세요. (GitHub에는 올리지 마세요!)</p>
-    <input id="file" type="file" accept=".json">
-    <button id="uploadBtn">업로드</button>
-    <button id="logoutBtn" style="background:#888">로그아웃</button>
-  </div>
+  <div id="adminArea" class="hidden">
+    <div class="tabs">
+      <button data-tab="reports" class="on">📋 제보 관리</button>
+      <button data-tab="upload">⬆ 데이터 업로드</button>
+    </div>
 
-  <div id="log"></div>
-</div>
+    <!-- 제보 관리 -->
+    <div class="card" id="tab-reports">
+      <h2>제보 관리</h2>
+      <div class="filters">
+        <select id="fRange">
+          <option value="1">오늘(24시간)</option>
+          <option value="3">최근 3일</option>
+          <option value="7" selected>최근 7일</option>
+          <option value="30">최근 30일</option>
+          <option value="0">전체</option>
+        </select>
+        <select id="fStatus"><option value="">모든 상태</option></select>
+        <label><input type="checkbox" id="fDoubt"> 👎 받은 제보만</label>
+        <input id="fText" placeholder="공간 이름 · 설명 · 제보자 검색" style="flex:1;min-width:200px">
+        <button id="fClear">필터 초기화</button>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="bulk">
+        <label><input type="checkbox" id="checkAll"> 전체 선택</label>
+        <button class="danger" id="delSelected">선택한 제보 삭제</button>
+        <span class="muted">|</span>
+        <button class="danger" id="cleanOld">30일 지난 제보 모두 정리</button>
+      </div>
+      <div style="max-height:60vh;overflow:auto">
+        <table>
+          <thead><tr><th></th><th>시각</th><th>공간</th><th>상태</th><th>설명</th><th>의견</th><th>제보자</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div id="log"></div>
+    </div>
+
+    <!-- 데이터 업로드 -->
+    <div class="card hidden" id="tab-upload">
+      <h2>시간표 · 명단 · 기숙사 데이터 올리기</h2>
+      <p>Claude가 보내준 <b>timetable-data.json</b> 파일을 고르세요. (GitHub에는 절대 올리지 마세요!)</p>
+      <input id="file" type="file" accept=".json">
+      <button id="uploadBtn" class="primary">업로드</button>
+      <div id="upLog" style="white-space:pre-wrap;margin-top:10px;font-size:13px"></div>
+    </div>
+  </div>
+</main>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="firebase-config.js"></script>
+<script src="spaces.js"></script>
 <script>
   const ADMIN_EMAIL = "admin@school-map.local";
+  const STATUS = {
+    available: ["사용 가능", "#4caf72"], in_use: ["사용 중", "#f0b429"], broken: ["기자재 이상", "#e25c5c"],
+    closed: ["이용 불가", "#8e6bd6"], other: ["기타", "#5b8fb9"]
+  };
   const $ = (id) => document.getElementById(id);
+  const el = (tag, attrs = {}, text) => {
+    const e = document.createElement(tag);
+    for (const k in attrs) { if (k === "class") e.className = attrs[k]; else e.setAttribute(k, attrs[k]); }
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
   const log = (m) => { $("log").textContent = m; };
 
   firebase.initializeApp(FIREBASE_CONFIG);
   const fa = firebase.auth(), db = firebase.firestore();
   fa.setPersistence(firebase.auth.Auth.Persistence.SESSION);
 
-  fa.onAuthStateChanged((u) => {
+  // ---------- 이름 표시 ----------
+  const roomById = {};
+  MAP_DATA.rooms.forEach((r) => { roomById[r.id] = r; });
+  const bName = {};
+  MAP_DATA.buildings.forEach((b) => { bName[b.id] = b.name; });
+  function spaceName(id) {
+    const r = roomById[id];
+    return r ? `${bName[r.building]} ${r.floor}층 ${r.name}` : `(지도에 없는 공간: ${id})`;
+  }
+  let studentNames = {};   // 학번 → 이름 (비공개 시간표에서 받아옴)
+  const showId = (id) => (/^\d0\d{3}$/.test(id) ? id[0] + id.slice(2) : id);
+  function decodeTeacher(id) {
+    try { return new TextDecoder().decode(new Uint8Array(id.slice(1).match(/../g).map((h) => parseInt(h, 16)))); }
+    catch (e) { return id; }
+  }
+  function personName(loginId) {
+    if (!loginId) return "(기록 없음)";
+    if (/^t[0-9a-f]+$/.test(loginId)) return decodeTeacher(loginId) + " 선생님";
+    return `${studentNames[loginId] || "?"} (${showId(loginId)})`;
+  }
+
+  // ---------- 로그인 ----------
+  let unsub = [], reportsUnsub = null;
+  fa.onAuthStateChanged(async (u) => {
+    unsub.forEach((f) => f()); unsub = [];
+    if (reportsUnsub) { reportsUnsub(); reportsUnsub = null; }
     const ok = u && u.email === ADMIN_EMAIL;
     $("loginArea").classList.toggle("hidden", !!ok);
-    $("uploadArea").classList.toggle("hidden", !ok);
-    if (u && !ok) { log("관리자 계정이 아니에요."); fa.signOut(); }
-    else if (ok) log("관리자로 로그인했어요.");
+    $("adminArea").classList.toggle("hidden", !ok);
+    $("logoutBtn").classList.toggle("hidden", !ok);
+    $("who").textContent = ok ? "관리자로 로그인함" : "";
+    if (u && !ok) { $("loginLog").textContent = "관리자 계정이 아니에요."; fa.signOut(); return; }
+    if (ok) startAdmin();
   });
-
   $("loginBtn").onclick = async () => {
     try { await fa.signInWithEmailAndPassword(ADMIN_EMAIL, $("pw").value); }
-    catch (e) { log("로그인 실패: " + e.code); }
+    catch (e) { $("loginLog").textContent = "로그인 실패: " + e.code; }
   };
+  $("pw").addEventListener("keydown", (e) => { if (e.key === "Enter") $("loginBtn").click(); });
   $("logoutBtn").onclick = () => fa.signOut();
 
+  document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
+    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    $("tab-reports").classList.toggle("hidden", b.dataset.tab !== "reports");
+    $("tab-upload").classList.toggle("hidden", b.dataset.tab !== "upload");
+  });
+
+  // ---------- 제보 관리 ----------
+  let reports = [], authors = {};
+  Object.entries(STATUS).forEach(([k, [label]]) => $("fStatus").appendChild(el("option", { value: k }, label)));
+
+  async function startAdmin() {
+    try {
+      const doc = await db.collection("private").doc("timetable").get();
+      if (doc.exists) JSON.parse(doc.data().json).students.forEach(([id, name]) => { if (id) studentNames[id] = name; });
+    } catch (e) { /* 시간표가 아직 없으면 학번만 표시 */ }
+    subscribeReports();
+    unsub.push(db.collection("reportAuthors").onSnapshot((snap) => {
+      authors = {};
+      snap.docs.forEach((d) => { authors[d.id] = d.data().by; });
+      render();
+    }));
+  }
+
+  function subscribeReports() {
+    if (reportsUnsub) reportsUnsub();
+    let q = db.collection("reports").orderBy("createdAt", "desc").limit(1000);
+    const days = Number($("fRange").value);
+    if (days) q = db.collection("reports").where("createdAt", ">=", new Date(Date.now() - days * 86400000))
+                    .orderBy("createdAt", "desc").limit(1000);
+    reportsUnsub = q.onSnapshot((snap) => {
+      reports = snap.docs.map((d) => {
+        const x = d.data({ serverTimestamps: "estimate" });
+        return { id: d.id, ...x, createdAt: x.createdAt ? x.createdAt.toDate() : new Date(),
+                 confirms: x.confirms || 0, disputes: x.disputes || 0 };
+      });
+      render();
+    }, (e) => log("불러오기 실패: " + e.message));
+  }
+
+  function filtered() {
+    const st = $("fStatus").value, doubt = $("fDoubt").checked;
+    const q = $("fText").value.trim().replace(/\s+/g, "").toLowerCase();
+    return reports.filter((r) => {
+      if (st && r.status !== st) return false;
+      if (doubt && !r.disputes) return false;
+      if (q) {
+        const hay = (spaceName(r.spaceId) + (r.note || "") + personName(authors[r.id]) + (authors[r.id] || ""))
+          .replace(/\s+/g, "").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function fmt(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function render() {
+    const list = filtered();
+    // 통계
+    const stats = $("stats"); stats.innerHTML = "";
+    stats.appendChild(el("span", { class: "stat" }, `표시 ${list.length}건 / 불러온 ${reports.length}건`));
+    Object.entries(STATUS).forEach(([k, [label]]) => {
+      const n = list.filter((r) => r.status === k).length;
+      if (n) stats.appendChild(el("span", { class: "stat" }, `${label} ${n}`));
+    });
+    const dn = list.filter((r) => r.disputes).length;
+    if (dn) stats.appendChild(el("span", { class: "stat" }, `👎 받은 제보 ${dn}`));
+    // 제보 많이 한 사람
+    const cnt = {};
+    list.forEach((r) => { const a = authors[r.id]; if (a) cnt[a] = (cnt[a] || 0) + 1; });
+    const top = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    if (top.length) stats.appendChild(el("span", { class: "stat" },
+      "많이 제보한 사람: " + top.map(([a, n]) => `${personName(a)} ${n}건`).join(", ")));
+
+    // 표
+    const tb = $("rows"); tb.innerHTML = "";
+    if (!list.length) { const tr = el("tr"); tr.appendChild(el("td", { colspan: 8, class: "muted" }, "해당하는 제보가 없어요.")); tb.appendChild(tr); }
+    list.forEach((r) => {
+      const tr = el("tr", r.disputes >= 2 && r.disputes > r.confirms ? { class: "doubt" } : {});
+      const cb = el("input", { type: "checkbox", "data-id": r.id });
+      const td0 = el("td"); td0.appendChild(cb); tr.appendChild(td0);
+      tr.appendChild(el("td", {}, fmt(r.createdAt)));
+      tr.appendChild(el("td", {}, spaceName(r.spaceId)));
+      const [label, color] = STATUS[r.status] || [r.status, "#999"];
+      const tdS = el("td"); const dot = el("span", { class: "dot" }); dot.style.background = color;
+      tdS.append(dot, document.createTextNode(label)); tr.appendChild(tdS);
+      tr.appendChild(el("td", { class: "note" }, r.note || ""));
+      tr.appendChild(el("td", {}, `👍${r.confirms} 👎${r.disputes}`));
+      const tdW = el("td");
+      const w = el("span", { class: "who" }, personName(authors[r.id]));
+      w.title = "이 사람의 제보만 보기";
+      w.onclick = () => { $("fText").value = authors[r.id] ? personName(authors[r.id]) : ""; render(); };
+      tdW.appendChild(w); tr.appendChild(tdW);
+      const tdB = el("td"); const del = el("button", { class: "danger" }, "삭제");
+      del.onclick = async () => {
+        if (!confirm(`이 제보를 삭제할까요?\n${spaceName(r.spaceId)} · ${label}\n${r.note || ""}`)) return;
+        del.disabled = true;
+        await deleteReports([r.id]);
+      };
+      tdB.appendChild(del); tr.appendChild(tdB);
+      tb.appendChild(tr);
+    });
+    $("checkAll").checked = false;
+  }
+
+  // 제보 삭제: 제보 + 제보자 기록 + 의견 기록까지 함께
+  async function deleteReports(ids) {
+    let done = 0;
+    for (const id of ids) {
+      try {
+        const votes = await db.collection("votes").where("report", "==", id).get();
+        const batch = db.batch();
+        batch.delete(db.collection("reports").doc(id));
+        batch.delete(db.collection("reportAuthors").doc(id));
+        votes.docs.forEach((v) => batch.delete(v.ref));
+        await batch.commit();
+        done++;
+      } catch (e) { log(`삭제 실패 (${id}): ${e.message}`); }
+    }
+    log(`🗑 ${done}건 삭제했어요.`);
+  }
+
+  ["fStatus", "fDoubt"].forEach((id) => $(id).addEventListener("change", render));
+  $("fText").addEventListener("input", render);
+  $("fRange").addEventListener("change", subscribeReports);
+  $("fClear").onclick = () => { $("fStatus").value = ""; $("fDoubt").checked = false; $("fText").value = ""; render(); };
+  $("checkAll").onchange = () => document.querySelectorAll("#rows input[type=checkbox]")
+    .forEach((c) => { c.checked = $("checkAll").checked; });
+  $("delSelected").onclick = async () => {
+    const ids = [...document.querySelectorAll("#rows input[type=checkbox]:checked")].map((c) => c.dataset.id);
+    if (!ids.length) { log("삭제할 제보를 먼저 선택하세요."); return; }
+    if (!confirm(`선택한 제보 ${ids.length}건을 삭제할까요?`)) return;
+    await deleteReports(ids);
+  };
+  $("cleanOld").onclick = async () => {
+    const snap = await db.collection("reports").where("createdAt", "<", new Date(Date.now() - 30 * 86400000)).get();
+    if (!snap.size) { log("30일 지난 제보가 없어요."); return; }
+    if (!confirm(`30일 지난 제보 ${snap.size}건을 모두 삭제할까요?`)) return;
+    await deleteReports(snap.docs.map((d) => d.id));
+  };
+
+  // ---------- 데이터 업로드 ----------
   $("uploadBtn").onclick = async () => {
     const f = $("file").files[0];
-    if (!f) { log("파일을 골라 주세요."); return; }
+    if (!f) { $("upLog").textContent = "파일을 골라 주세요."; return; }
     $("uploadBtn").disabled = true;
     try {
       const data = JSON.parse(await f.text());
@@ -83,9 +331,10 @@
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       const t = data.timetable;
-      log(`✅ 업로드 완료\n명단 ${Object.keys(ids).length}명 (학생 ${Object.values(data.roster).filter((v) => v === "student").length}, 선생님 ${Object.values(data.roster).filter((v) => v === "teacher").length})\n정규 수업 ${t.sessions.length}개, 방과후 ${t.extra.length}개`);
+      t.students.forEach(([id, name]) => { if (id) studentNames[id] = name; });
+      $("upLog").textContent = `✅ 업로드 완료\n명단 ${Object.keys(ids).length}명 (학생 ${Object.values(data.roster).filter((v) => v === "student").length}, 선생님 ${Object.values(data.roster).filter((v) => v === "teacher").length})\n정규 수업 ${t.sessions.length}개, 방과후 ${t.extra.length}개, 기숙사 방 ${Object.keys(t.dorm || {}).length}개`;
     } catch (e) {
-      log("업로드 실패: " + e.message);
+      $("upLog").textContent = "업로드 실패: " + e.message;
     } finally {
       $("uploadBtn").disabled = false;
     }
