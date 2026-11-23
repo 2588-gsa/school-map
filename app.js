@@ -910,6 +910,7 @@ function renderMyHome(panel) {
   }
   box.appendChild(link("내 시간표 전체 보기 →", () => openPerson(me.kind, me.id)));
   panel.appendChild(box);
+  renderTasks(panel);   // 📝 과제 · 할 일 (classroom.js)
 }
 
 // 다가오는 학사일정 (2주) + 시험 D-day

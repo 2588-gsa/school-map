@@ -167,3 +167,25 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .tt-row.rank { align-items: center; }
 .rk-name { flex: 1; font-weight: bold; }
 .rk-num { font-size: 12px; color: #667; }
+
+/* 과제 · 할 일 */
+.task-box h3 { margin-top: 4px; }
+.cr-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 13px; flex-wrap: wrap; }
+.cr-btn { background: #fff; border: 1px solid #c6d4ea; color: #1f5fbf; font-weight: bold; }
+.task-row { display: flex; gap: 8px; align-items: flex-start; padding: 7px 2px; border-bottom: 1px solid #eef0f3; font-size: 14px; }
+.task-row input[type=checkbox] { margin-top: 3px; }
+.task-row.done .task-title { text-decoration: line-through; color: #999; }
+.task-ico { width: 16px; }
+.task-main { flex: 1; min-width: 0; }
+.task-title { color: #1f3a5f; font-weight: bold; text-decoration: none; word-break: break-all; }
+a.task-title:hover { text-decoration: underline; }
+.task-sub { font-size: 12px; color: #778; margin-top: 2px; }
+.task-badge { font-size: 11px; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.task-badge.soon { background: #fff1d6; color: #b26b00; }
+.task-badge.over { background: #fde4e1; color: #c0392b; }
+.task-del { border: none; background: none; color: #bbb; padding: 0 4px; }
+.task-del:hover { color: #c0392b; }
+.todo-form { display: flex; gap: 6px; margin: 10px 0 6px; flex-wrap: wrap; }
+.todo-form input[type=text] { flex: 1; min-width: 140px; padding: 7px 9px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+.todo-form input[type=date] { padding: 6px 8px; border: 1px solid #ccd; border-radius: 8px; font-family: inherit; }
+.task-box > a.tt-link { display: inline-block; font-size: 12px; margin-top: 2px; }

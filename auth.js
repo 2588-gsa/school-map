@@ -200,6 +200,7 @@ function setupAuth() {
     auth.info = user ? infoFromUser(user) : null;
     unloadTimetable();
     state.person = null; state.highlightId = null; state.myVotes = {}; state.ranking = null;
+    if (!user) clearTasks();
     state.selectedId = null;
     if (user && auth.pendingDefault === user.email) {
       try { localStorage.setItem(mustChangeKey(user.uid), "1"); } catch (e) {}
@@ -223,6 +224,7 @@ function setupAuth() {
         showToast(e.message, true);
       }
       try { state.myVotes = await store.myVotes(); } catch (e) { state.myVotes = {}; }
+      await setupTasksForUser();   // 내 할 일 + (연결돼 있으면) 클래스룸 과제
       try {   // 관리자 페이지가 올려 둔 랭킹
         const rk = await firebase.firestore().collection("private").doc("ranking").get();
         state.ranking = rk.exists ? rk.data() : null;

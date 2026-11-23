@@ -85,6 +85,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ---------- 내 할 일 (본인만 읽고 씀) ----------
+    match /userData/{userId} {
+      allow read, delete: if onRoster() && userId == loginId();
+      allow create, update: if onRoster() && userId == loginId() &&
+        request.resource.data.keys().hasOnly(['todos']) &&
+        request.resource.data.todos is list &&
+        request.resource.data.todos.size() <= 100;
+    }
+
     // ---------- 비공개 데이터 (시간표, 명단) ----------
     match /private/{docId} {
       allow read: if onRoster() || isAdmin();
