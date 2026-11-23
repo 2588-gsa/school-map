@@ -133,6 +133,7 @@ async function loadClassroom() {
         const sub = state[w.id];
         const done = !!sub && (sub.state === "TURNED_IN" || sub.state === "RETURNED");
         items.push({ id: "cr-" + w.id, title: w.title, course: c.name, due, done,
+                     created: w.creationTime ? new Date(w.creationTime) : null,
                      late: !!(sub && sub.late), link: w.alternateLink, source: "classroom" });
       });
     }
@@ -227,9 +228,12 @@ function renderTasks(panel) {
 
   // 클래스룸 과제 + 내 할 일을 마감 순으로 합치기
   const now = Date.now();
-  const cr = (tasks.crItems || []).filter((x) =>
-    // 제출 안 한 과제는 마감 지나도 7일까지, 제출한 과제는 "완료 보기"에서만
-    x.due ? x.due.getTime() > now - 7 * 86400000 : !x.done);
+  const cr = (tasks.crItems || []).filter((x) => {
+    // 마감 있는 과제: 마감 지나도 7일까지 보여 줌 / 제출한 과제는 "완료한 것도 보기"에서만
+    if (x.due) return x.due.getTime() > now - 7 * 86400000;
+    // 마감 없는 과제: 최근 2주 안에 올라온 것만 (예전 자료가 쌓이지 않게)
+    return x.created && x.created.getTime() > now - 14 * 86400000;
+  });
   const td = tasks.todos.map((t) => ({ ...t, due: todoDue(t), source: "todo" }));
   const all = [...cr, ...td].filter((x) => tasks.showDone || !x.done)
     .sort((a, b) => (a.done - b.done) || ((a.due ? a.due.getTime() : Infinity) - (b.due ? b.due.getTime() : Infinity)));
