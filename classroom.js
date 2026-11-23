@@ -31,12 +31,15 @@ function crTokenClient() {
     client_id: GOOGLE_CLIENT_ID,
     scope: CLASSROOM_SCOPES,
     callback: (resp) => {
-      if (resp.error) { tasks.crError = crErrorText(resp.error); tasks.crLoading = false; renderPanel(); return; }
+      clearTimeout(crWaitTimer);
+      if (resp.error) { console.error("[클래스룸] 오류", resp); tasks.crError = crErrorText(resp.error); tasks.crLoading = false; renderPanel(); return; }
       tasks.crToken = { token: resp.access_token, exp: Date.now() + (resp.expires_in - 60) * 1000 };
       try { sessionStorage.setItem(CR_KEY, JSON.stringify(tasks.crToken)); } catch (e) {}
       loadClassroom();
     },
     error_callback: (err) => {   // 창을 닫았거나 팝업이 막힘
+      console.error("[클래스룸] 창 오류", err);
+      clearTimeout(crWaitTimer);
       tasks.crLoading = false;
       tasks.crError = err && err.type === "popup_failed_to_open" ? "팝업이 막혔어요. 브라우저에서 팝업을 허용해 주세요." : "";
       renderPanel();
@@ -48,11 +51,32 @@ function crErrorText(code) {
   if (code === "access_denied") return "연결을 허락하지 않았어요.";
   return "연결 실패: " + code;
 }
+let crWaitTimer = null;
 function connectClassroom() {
-  const tc = crTokenClient();
-  if (!tc) { showToast("Google 로그인 도구를 불러오지 못했어요. 새로고침해 주세요.", true); return; }
+  let tc = null;
+  try { tc = crTokenClient(); } catch (e) { console.error("[클래스룸] 준비 실패", e); }
+  if (!tc) {
+    tasks.crError = typeof google === "undefined"
+      ? "Google 로그인 도구를 불러오지 못했어요. 광고 차단 확장 프로그램을 끄거나 새로고침해 보세요."
+      : "Google 로그인 준비에 실패했어요. google-config.js의 클라이언트 ID를 확인해 주세요.";
+    renderPanel(); return;
+  }
   tasks.crError = ""; tasks.crLoading = true; renderPanel();
-  tc.requestAccessToken({ prompt: tasks.crToken ? "" : "consent" });
+  try { tc.requestAccessToken({ prompt: tasks.crToken ? "" : "consent" }); }
+  catch (e) { console.error("[클래스룸] 요청 실패", e); tasks.crLoading = false; tasks.crError = "연결 요청 실패: " + e.message; renderPanel(); return; }
+  // 구글 창에서 아무 응답이 없으면 2분 뒤 풀어 줌
+  clearTimeout(crWaitTimer);
+  crWaitTimer = setTimeout(() => {
+    if (tasks.crLoading && !tasks.crToken) {
+      tasks.crLoading = false;
+      tasks.crError = "구글 창에서 응답이 없어요. 창이 뒤에 숨어 있거나 팝업이 막혔는지 확인하고 다시 눌러 주세요.";
+      renderPanel();
+    }
+  }, 120000);
+}
+function cancelClassroom() {
+  clearTimeout(crWaitTimer);
+  tasks.crLoading = false; tasks.crError = ""; renderPanel();
 }
 function disconnectClassroom() {
   if (tasks.crToken && typeof google !== "undefined") google.accounts.oauth2.revoke(tasks.crToken.token, () => {});
@@ -115,6 +139,7 @@ async function loadClassroom() {
     tasks.crItems = items;
     tasks.crError = "";
   } catch (e) {
+    console.error("[클래스룸] 과제 불러오기 실패", e);
     if (e.expired) { tasks.crToken = null; tasks.crError = "연결이 만료됐어요. 다시 연결해 주세요."; }
     else if (e.forbidden) tasks.crError = "학교에서 이 앱의 클래스룸 접근을 막고 있어요. (" + e.message + ")";
     else tasks.crError = e.message;
@@ -183,7 +208,10 @@ function renderTasks(panel) {
   // 클래스룸 연결 상태
   if (crEnabled()) {
     const bar = el("div", { class: "cr-bar" });
-    if (tasks.crLoading) bar.appendChild(el("span", { class: "tt-sub" }, "클래스룸 과제를 불러오는 중..."));
+    if (tasks.crLoading) {
+      bar.appendChild(el("span", { class: "tt-sub" }, tasks.crToken ? "클래스룸 과제를 불러오는 중..." : "구글 창에서 계정을 고르고 허용해 주세요..."));
+      bar.appendChild(link("취소", cancelClassroom));
+    }
     else if (tasks.crToken) {
       bar.appendChild(el("span", { class: "tt-sub" }, tasks.crError ? "🟡 연결은 됐지만 과제를 못 불러왔어요" : "🟢 클래스룸 연결됨"));
       bar.appendChild(link("새로고침", loadClassroom));
