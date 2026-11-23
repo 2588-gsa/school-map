@@ -32,7 +32,8 @@ const state = {
   viewDay: null,       // 시간표에서 고른 요일 탭 (null이면 오늘)
   reports: [],         // 최신순으로 정렬된 제보 목록
   draft: { roomId: null, status: null, note: "" },
-  myVotes: {},         // 내가 의견을 남긴 제보 { 제보 id: "confirm" | "dispute" }   // 작성 중인 제보 (다시 그려도 유지)
+  myVotes: {},         // 내가 의견을 남긴 제보 { 제보 id: "confirm" | "dispute" }
+  ranking: null,       // 제보 랭킹 (private/ranking)
   edit: new URLSearchParams(location.search).get("edit") === "1"
 };
 
@@ -85,7 +86,7 @@ function makeFirebaseStore() {
         confirms: 0, disputes: 0
       });
       batch.set(db.collection("reportAuthors").doc(ref.id), { by: auth.info.id });
-      return batch.commit();
+      return batch.commit().then(() => ref.id);
     },
     // 의견: "confirm"(지금도 맞아요) / "dispute"(아닌 것 같아요). 한 사람당 제보 하나에 한 번
     vote(id, type) {
@@ -96,7 +97,7 @@ function makeFirebaseStore() {
       batch.set(db.collection("votes").doc(`${id}_${auth.info.id}`),
         { report: id, by: auth.info.id, type, at: FV.serverTimestamp() });
       return batch.commit().catch((e) => {
-        if (String(e.code || e.message).includes("permission")) throw new Error("이미 의견을 남긴 제보예요.");
+        if (String(e.code || e.message).includes("permission")) throw new Error("이미 의견을 남겼거나 내가 올린 제보예요.");
         throw e;
       });
     },
@@ -132,10 +133,10 @@ function makeLocalStore() {
     },
     add(r) {
       const arr = load();
-      arr.push({ id: "L" + Date.now() + Math.random().toString(36).slice(2, 6), ...r,
-                 createdAt: new Date().toISOString(), confirms: 0, disputes: 0 });
+      const id = "L" + Date.now() + Math.random().toString(36).slice(2, 6);
+      arr.push({ id, ...r, createdAt: new Date().toISOString(), confirms: 0, disputes: 0 });
       save(arr); emit();
-      return Promise.resolve();
+      return Promise.resolve(id);
     },
     vote(id, type) {
       const votes = load(VKEY);
@@ -346,7 +347,7 @@ function renderLegend() {
   lg.innerHTML = "";
   Object.values(STATUS).forEach((s) => lg.appendChild(el("span", { style: `--c:${s.color}` }, s.label)));
   lg.appendChild(el("span", { style: `--c:${NO_INFO_COLOR};` }, "정보 없음"));
-  lg.appendChild(el("span", { style: "--c:repeating-linear-gradient(45deg,#ccc 0 3px,#fff 3px 6px)" }, "흐릿함 = 오래된 정보"));
+  lg.appendChild(el("span", { style: "--c:repeating-linear-gradient(45deg,#ccc 0 3px,#fff 3px 6px)" }, "흐릿함 = 오래됐거나 👎가 많은 정보"));
 }
 
 // ----- 8. 오른쪽 패널 -----
@@ -357,9 +358,12 @@ function renderPanel() {
   const room = state.selectedId ? roomById(state.selectedId) : null;
 
   if (!room) {
-    panel.appendChild(el("h2", {}, state.view === "campus" ? "건물을 선택하세요" : "공간을 선택하세요"));
+    if (myPerson()) renderMyHome(panel);
+    else panel.appendChild(el("h2", {}, state.view === "campus" ? "건물을 선택하세요" : "공간을 선택하세요"));
     panel.appendChild(el("div", { class: "meta" }, "지도를 누르거나 위에서 교실·선생님·학생 이름으로 검색할 수 있어요."));
-    if (HAS_TT) panel.appendChild(el("div", { class: "now-line" }, "🕒 " + currentSlot(state.timeOverride).label));
+    if (!myPerson() && HAS_TT) panel.appendChild(el("div", { class: "now-line" }, "🕒 " + currentSlot(state.timeOverride).label));
+    renderUpcoming(panel, !myPerson());   // 학사일정은 공개 정보라 로그인 안 해도 보임
+    if (state.ranking) renderRanking(panel);
     renderRecentAll(panel);
     return;
   }
@@ -439,9 +443,23 @@ function renderRecentAll(panel) {
   panel.appendChild(hist);
 }
 
+// 내가 올린 제보 (내 제보에는 의견을 못 남기게 화면에서 미리 막음, 실제로는 규칙이 막음)
+function myReportIds() {
+  try { return JSON.parse(localStorage.getItem("myReports:" + (auth.info ? auth.info.id : "local")) || "[]"); }
+  catch (e) { return []; }
+}
+function rememberMyReport(id) {
+  try { localStorage.setItem("myReports:" + (auth.info ? auth.info.id : "local"), JSON.stringify([...myReportIds(), id].slice(-200))); }
+  catch (e) {}
+}
+
 // 제보에 대한 의견 버튼 (한 사람당 한 번)
 function voteButtons(rep) {
   const wrap = el("div", { class: "vote-row" });
+  if (myReportIds().includes(rep.id)) {
+    wrap.appendChild(el("span", { class: "voted" }, "✏️ 내가 올린 제보예요 (내 제보에는 의견을 남길 수 없어요)"));
+    return wrap;
+  }
   const mine = state.myVotes[rep.id];
   if (mine) {
     wrap.appendChild(el("span", { class: "voted" },
@@ -512,7 +530,8 @@ function buildForm(room) {
     btn.disabled = true;
     btn.textContent = "등록 중...";
     store.add({ spaceId: room.id, status: checked.value, note })
-      .then(() => {
+      .then((id) => {
+        if (id) rememberMyReport(id);
         state.draft = { roomId: null, status: null, note: "" };
         showToast("등록됐어요!");
         renderPanel();
@@ -809,6 +828,138 @@ function setupTimeBox() {
   };
   [mode, dateIn, perSel].forEach((x) => x.addEventListener("change", apply));
   box.append(mode, dateIn, perSel);
+}
+
+// ===== 로그인한 사람의 "오늘 내 일정" =====
+function myPerson() {
+  if (!HAS_TT || !auth.info) return null;
+  if (auth.info.kind === "student" && findStudent(auth.info.id)) return { kind: "student", id: auth.info.id };
+  if (auth.info.kind === "teacher") {
+    const n = decodeTeacher(auth.info.id);
+    if (TT.teachers[n] || TT.teacherExtra[n]) return { kind: "teacher", id: n };
+  }
+  return null;
+}
+function goHome() {
+  state.person = null; state.selectedId = null; state.highlightId = null;
+  renderAll();
+}
+// 그 교시에 할 일을 한 줄로 (수업이면 수업·선생님·교실, 아니면 공강·활동)
+function planLine(me, sl) {
+  const v = personNow(me.kind, me.id, sl);
+  const line = el("div", { class: "tt-line" });
+  if (v.sessions.length) {
+    v.sessions.forEach((x, i) => {
+      if (i) line.appendChild(el("br"));
+      joinParts(line, [sessionLink(x), me.kind !== "teacher" && x.teachers.length ? teacherLinks(x) : null, roomLink(x.room)]);
+    });
+    return { line, has: true, room: v.room };
+  }
+  if (v.text === "수업 없음") return { line: null, has: false };
+  joinParts(line, [el("b", {}, v.text), v.room ? roomLink(v.room) : null]);
+  return { line, has: true, room: v.room };
+}
+function renderMyHome(panel) {
+  const me = myPerson();
+  const slot = currentSlot(state.timeOverride);
+  const box = el("div", { class: "my-box" });
+  box.appendChild(el("h2", {}, "📌 오늘 내 일정"));
+  box.appendChild(el("div", { class: "tt-head" }, "🕒 " + slot.label));
+
+  // 오늘 학사일정
+  const today = eventsOn(slot.date);
+  if (today.length) box.appendChild(el("div", { class: "today-ev" }, "📅 오늘: " + today.map((e) => e.title).join(", ")));
+  if (today.some((e) => e.kind === "exam"))
+    box.appendChild(el("div", { class: "warn soft" }, "정기시험 기간이라 실제 일정은 시간표와 다를 수 있어요."));
+
+  const weekday = WEEKDAYS.includes(slot.day) && !slot.holiday;
+  if (weekday) {
+    // 지금
+    if (slot.inClass) {
+      box.appendChild(el("div", { class: "my-sec" }, `지금 · ${slot.period}교시`));
+      const now = planLine(me, slot);
+      box.appendChild(now.line || el("div", { class: "tt-empty" }, "지금은 수업이 없어요."));
+    }
+    // 다음 (지금보다 뒤에 시작하는 교시 중 할 일이 있는 첫 교시)
+    const later = TIMETABLE.periods.filter((p) => toMin(p.start) > slot.min);
+    let next = null;
+    for (const p of later) {
+      const r = planLine(me, { ...slot, period: p.p, inClass: true });
+      if (r.has) { next = { p, r }; break; }
+    }
+    if (next) {
+      const mins = toMin(next.p.start) - slot.min;
+      const when = mins >= 60 ? `${Math.floor(mins / 60)}시간 ${mins % 60}분 후` : `${mins}분 후`;
+      box.appendChild(el("div", { class: "my-sec" }, `다음 · ${next.p.p}교시 ${next.p.start} (${when})`));
+      box.appendChild(next.r.line);
+    } else if (!slot.inClass || later.length) {
+      box.appendChild(el("div", { class: "my-sec" }, "다음"));
+      box.appendChild(el("div", { class: "tt-empty" }, "오늘 남은 수업이 없어요."));
+    }
+    // 오늘 남은 수업 수
+    const left = later.filter((p) => planLine(me, { ...slot, period: p.p, inClass: true }).has).length;
+    if (left > 1) box.appendChild(link(`오늘 남은 일정 ${left}개 모두 보기 →`, () => openPerson(me.kind, me.id)));
+  } else {
+    box.appendChild(el("div", { class: "tt-empty" }, slot.holiday ? `${slot.holiday}이라 수업이 없어요.` : "오늘은 수업이 없어요."));
+  }
+  // 기숙사
+  if (me.kind === "student" && TT.dormOf[me.id]) {
+    const r = roomById(TT.dormOf[me.id]);
+    if (r) box.appendChild(joinParts(el("div", { class: "tt-line dorm-line2" }),
+      [document.createTextNode("🛏 내 방"), link(`${buildingById(r.building).name} ${r.name}`, () => goToRoom(r.id), "tt-room")]));
+  }
+  box.appendChild(link("내 시간표 전체 보기 →", () => openPerson(me.kind, me.id)));
+  panel.appendChild(box);
+}
+
+// 다가오는 학사일정 (2주) + 시험 D-day
+function renderUpcoming(panel, showToday) {
+  if (typeof CALENDAR !== "object" || typeof TIMETABLE === "undefined") return;
+  const slot = HAS_TT ? currentSlot(state.timeOverride) : { date: ymd(new Date()) };
+  const box = el("div", { class: "history" });
+  box.appendChild(el("h3", {}, "📅 다가오는 학사일정"));
+  // 60일 안의 시험은 D-day로
+  CALENDAR.events.filter((e) => e.kind === "exam" && e.date > slot.date && daysBetween(slot.date, e.date) <= 60)
+    .forEach((e) => box.appendChild(el("div", { class: "dday" }, `${e.title} D-${daysBetween(slot.date, e.date)}`)));
+  if (showToday) {
+    const today = eventsOn(slot.date);
+    if (today.length) box.appendChild(el("div", { class: "today-ev" }, "오늘: " + today.map((e) => e.title).join(", ")));
+  }
+  const list = upcomingEvents(slot.date, 14);
+  if (!list.length) box.appendChild(el("div", { class: "tt-empty" }, "2주 안에 일정이 없어요."));
+  list.forEach((e) => {
+    const row = el("div", { class: "tt-row" });
+    const dn = DAY_NAMES[new Date(e.date + "T00:00").getDay()];
+    row.appendChild(el("span", { class: "tt-p wide" }, `${mdLabel(e.date, dn)}`));
+    const end = e.end ? ` (~${Number(e.end.slice(5, 7))}/${Number(e.end.slice(8))})` : "";
+    row.appendChild(el("span", { class: "ev-" + e.kind }, e.title + end));
+    box.appendChild(row);
+  });
+  panel.appendChild(box);
+}
+
+// 🏆 제보 랭킹 (관리자 페이지가 계산해서 올려 둔 private/ranking)
+function renderRanking(panel) {
+  const rk = state.ranking;
+  const box = el("div", { class: "history" });
+  box.appendChild(el("h3", {}, `🏆 믿을 만한 제보 랭킹 (최근 ${rk.days}일)`));
+  const medal = ["🥇", "🥈", "🥉"];
+  const rows = rk.rows.filter((r) => r.score > 0);
+  if (!rows.length) box.appendChild(el("div", { class: "tt-empty" }, "아직 순위가 없어요. 제보에 👍를 받으면 점수가 올라가요."));
+  rows.slice(0, 5).forEach((r, i) => box.appendChild(rankRow(r, medal[i] || `${i + 1}위`)));
+  const myIdx = auth.info ? rows.findIndex((r) => r.id === auth.info.id) : -1;
+  if (myIdx >= 5) { box.appendChild(el("div", { class: "tt-empty" }, "⋯")); box.appendChild(rankRow(rows[myIdx], `${myIdx + 1}위`, true)); }
+  else if (auth.info && myIdx < 0) box.appendChild(el("div", { class: "tt-empty" }, "나는 아직 순위에 없어요."));
+  box.appendChild(el("div", { class: "tt-note" },
+    `점수 = 확인된 제보×3 + 받은 👍 − 받은 👎×2 · 확인된 제보: 👍가 👎보다 많은 제보 · 갱신 ${rk.updated || ""}`));
+  panel.appendChild(box);
+}
+function rankRow(r, rank, me) {
+  const row = el("div", { class: "tt-row rank" + (me || (auth.info && r.id === auth.info.id) ? " now" : "") });
+  row.appendChild(el("span", { class: "tt-p" }, rank));
+  row.appendChild(el("span", { class: "rk-name" }, r.name));
+  row.appendChild(el("span", { class: "rk-num" }, `확인 ${r.confirmed} · 👍${r.up} 👎${r.down} · ${r.score}점`));
+  return row;
 }
 
 // 상태 등록·확인은 로그인한 사람만 (로컬 테스트 모드는 예외)

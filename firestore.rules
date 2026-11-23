@@ -78,7 +78,10 @@ service cloud.firestore {
         voteId == request.resource.data.report + '_' + loginId() &&
         request.resource.data.type in ['confirm', 'dispute'] &&
         request.resource.data.at == request.time &&
-        existsAfter(docPath('reports', request.resource.data.report));
+        existsAfter(docPath('reports', request.resource.data.report)) &&
+        // 내가 올린 제보에는 의견을 남길 수 없음 (랭킹 점수 부풀리기 방지)
+        (!exists(docPath('reportAuthors', request.resource.data.report)) ||
+         get(docPath('reportAuthors', request.resource.data.report)).data.by != loginId());
       allow delete: if isAdmin();
     }
 

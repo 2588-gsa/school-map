@@ -59,6 +59,7 @@
   <div id="adminArea" class="hidden">
     <div class="tabs">
       <button data-tab="reports" class="on">📋 제보 관리</button>
+      <button data-tab="ranking">🏆 랭킹</button>
       <button data-tab="upload">⬆ 데이터 업로드</button>
     </div>
 
@@ -92,6 +93,19 @@
         </table>
       </div>
       <div id="log"></div>
+    </div>
+
+    <!-- 랭킹 -->
+    <div class="card hidden" id="tab-ranking">
+      <h2>🏆 믿을 만한 제보 랭킹</h2>
+      <p>최근 30일 제보로 계산해요. <b>점수 = 확인된 제보×3 + 받은 👍 − 받은 👎×2</b> (확인된 제보: 👍가 1개 이상이고 👎보다 많은 제보).
+         관리자 페이지가 열려 있으면 제보가 바뀔 때마다 자동으로 다시 계산해서 학생들 화면에 올려요.</p>
+      <button id="rankBtn" class="primary">지금 랭킹 계산해서 올리기</button>
+      <span id="rankInfo" class="muted" style="margin-left:8px"></span>
+      <div style="max-height:60vh;overflow:auto;margin-top:10px">
+        <table><thead><tr><th>순위</th><th>이름</th><th>제보</th><th>확인된 제보</th><th>👍</th><th>👎</th><th>점수</th></tr></thead>
+        <tbody id="rankRows"></tbody></table>
+      </div>
     </div>
 
     <!-- 데이터 업로드 -->
@@ -172,8 +186,7 @@
 
   document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    $("tab-reports").classList.toggle("hidden", b.dataset.tab !== "reports");
-    $("tab-upload").classList.toggle("hidden", b.dataset.tab !== "upload");
+    ["reports", "ranking", "upload"].forEach((t) => $("tab-" + t).classList.toggle("hidden", b.dataset.tab !== t));
   });
 
   // ---------- 제보 관리 ----------
@@ -190,7 +203,14 @@
       authors = {};
       snap.docs.forEach((d) => { authors[d.id] = d.data().by; });
       render();
+      scheduleRanking();
     }));
+    // 랭킹용: 최근 30일 제보 (위 목록 필터와 상관없이)
+    unsub.push(db.collection("reports").where("createdAt", ">=", new Date(Date.now() - RANK_DAYS * 86400000))
+      .onSnapshot((snap) => {
+        rankReports = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        scheduleRanking();
+      }));
   }
 
   function subscribeReports() {
@@ -313,6 +333,47 @@
     if (!confirm(`30일 지난 제보 ${snap.size}건을 모두 삭제할까요?`)) return;
     await deleteReports(snap.docs.map((d) => d.id));
   };
+
+  // ---------- 랭킹 ----------
+  const RANK_DAYS = 30;
+  let rankReports = [], rankTimer = null, lastPublished = "";
+  function computeRanking() {
+    const by = {};
+    rankReports.forEach((r) => {
+      const a = authors[r.id];
+      if (!a) return;   // 제보자 기록이 없는 예전 제보는 제외
+      const s = by[a] || (by[a] = { id: a, name: personName(a), reports: 0, confirmed: 0, up: 0, down: 0 });
+      const up = r.confirms || 0, down = r.disputes || 0;
+      s.reports++; s.up += up; s.down += down;
+      if (up >= 1 && up > down) s.confirmed++;
+    });
+    return Object.values(by).map((s) => ({ ...s, score: s.confirmed * 3 + s.up - s.down * 2 }))
+      .sort((a, b) => b.score - a.score || b.confirmed - a.confirmed || a.down - b.down);
+  }
+  function renderRanking(rows) {
+    const tb = $("rankRows"); tb.innerHTML = "";
+    rows.forEach((r, i) => {
+      const tr = el("tr");
+      [i + 1, r.name, r.reports, r.confirmed, r.up, r.down, r.score].forEach((v) => tr.appendChild(el("td", {}, String(v))));
+      tb.appendChild(tr);
+    });
+    if (!rows.length) { const tr = el("tr"); tr.appendChild(el("td", { colspan: 7, class: "muted" }, "아직 계산할 제보가 없어요.")); tb.appendChild(tr); }
+  }
+  async function publishRanking() {
+    const rows = computeRanking();
+    renderRanking(rows);
+    const key = JSON.stringify(rows);
+    if (key === lastPublished) return;          // 바뀐 게 없으면 다시 올리지 않음
+    const now = new Date();
+    const updated = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    try {
+      await db.collection("private").doc("ranking").set({ days: RANK_DAYS, updated, rows });
+      lastPublished = key;
+      $("rankInfo").textContent = `올림: ${updated} · ${rows.length}명`;
+    } catch (e) { $("rankInfo").textContent = "올리기 실패: " + e.message; }
+  }
+  function scheduleRanking() { clearTimeout(rankTimer); rankTimer = setTimeout(publishRanking, 2000); }
+  $("rankBtn").onclick = () => { lastPublished = ""; publishRanking(); };
 
   // ---------- 데이터 업로드 ----------
   $("uploadBtn").onclick = async () => {

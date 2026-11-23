@@ -69,39 +69,70 @@ const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0
 const mdLabel = (date, day) => `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}(${day})`;
 
 // override: { date: "2026-11-05", period: 8 } 이면 그 시간으로 가정 (테스트용)
-function currentSlot(override) {
+// 지금(또는 고른 시간)의 요일·교시 + 학사일정(휴일·방학·대체 수업) 반영
+function currentSlot(override) { return applyCalendar(rawSlot(override)); }
+
+function applyCalendar(slot) {
+  if (typeof CALENDAR !== "object" || !slot.date) return slot;
+  const sw = CALENDAR.swap[slot.date];
+  const off = CALENDAR.noClass[slot.date];
+  if (off && !sw)
+    return { ...slot, period: null, inClass: false, holiday: off,
+             label: `${mdLabel(slot.date, slot.day)} ${off} · 수업 없음` };
+  // 대체 수업: 그날은 다른 요일 시간표로 (예: 12/24(목) → 화요일 시간표)
+  if (sw) return { ...slot, realDay: slot.day, day: sw, label: `${slot.label} · ${sw}요일 시간표로 수업` };
+  return slot;
+}
+
+// 학사일정 조회
+function eventsOn(date) {
+  if (typeof CALENDAR !== "object") return [];
+  return CALENDAR.events.filter((e) => e.date === date || (e.end && e.date <= date && date <= e.end));
+}
+function upcomingEvents(fromDate, days) {
+  if (typeof CALENDAR !== "object") return [];
+  const [y, m, d] = fromDate.split("-").map(Number);
+  const until = ymd(new Date(y, m - 1, d + days));
+  return CALENDAR.events.filter((e) => e.date > fromDate && e.date <= until);
+}
+function daysBetween(a, b) {
+  const t = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).getTime(); };
+  return Math.round((t(b) - t(a)) / 86400000);
+}
+
+function rawSlot(override) {
   if (override) {
     const [y, m, d] = override.date.split("-").map(Number);
     const day = DAY_NAMES[new Date(y, m - 1, d).getDay()];
     const p = TIMETABLE.periods.find((x) => x.p === override.period);
     if (day === "토" || day === "일")
       return { day, date: override.date, period: null, inClass: false, label: `${mdLabel(override.date, day)} 주말이라 수업이 없어요` };
-    return { day, date: override.date, period: override.period, inClass: true,
+    return { day, date: override.date, period: override.period, inClass: true, min: toMin(p.start),
              label: `${mdLabel(override.date, day)} ${override.period}교시 (${p.start}~${p.end}) · 시간 바꿔보기 중` };
   }
   const now = new Date();
   const day = DAY_NAMES[now.getDay()];
   const date = ymd(now);
   const t = now.getHours() * 60 + now.getMinutes();
-  if (day === "토" || day === "일") return { day, date, period: null, inClass: false, label: `${mdLabel(date, day)} 주말이라 수업이 없어요` };
+  if (day === "토" || day === "일") return { day, date, min: t, period: null, inClass: false, label: `${mdLabel(date, day)} 주말이라 수업이 없어요` };
 
   const ps = TIMETABLE.periods;
   const cur = ps.find((p) => toMin(p.start) <= t && t < toMin(p.end));
-  if (cur) return { day, date, period: cur.p, inClass: true, label: `${mdLabel(date, day)} ${cur.p}교시 (${cur.start}~${cur.end})` };
+  if (cur) return { day, date, min: t, period: cur.p, inClass: true, label: `${mdLabel(date, day)} ${cur.p}교시 (${cur.start}~${cur.end})` };
 
   // 점심·저녁·야간 자습 시간
   const blk = (TIMETABLE.blocks || []).find((x) => toMin(x.start) <= t && t < toMin(x.end));
-  if (blk) return { day, date, period: null, inClass: false, label: `${mdLabel(date, day)} · ${blk.name} (${blk.start}~${blk.end})` };
+  if (blk) return { day, date, min: t, period: null, inClass: false, label: `${mdLabel(date, day)} · ${blk.name} (${blk.start}~${blk.end})` };
 
   if (t < toMin(ps[0].start))
-    return { day, date, period: null, inClass: false, label: `${mdLabel(date, day)} · 수업 시작 전 (1교시 ${ps[0].start} 시작)` };
+    return { day, date, min: t, period: null, inClass: false, label: `${mdLabel(date, day)} · 수업 시작 전 (1교시 ${ps[0].start} 시작)` };
 
   // 다음 일정 (교시 또는 점심·야간 자습 중 가장 가까운 것)
   const upcoming = [...ps.map((p) => ({ name: p.p + "교시", start: p.start })),
                     ...(TIMETABLE.blocks || []).map((x) => ({ name: x.name, start: x.start }))]
     .filter((x) => t < toMin(x.start)).sort((a, b) => toMin(a.start) - toMin(b.start));
-  if (!upcoming.length) return { day, date, period: null, inClass: false, label: `${mdLabel(date, day)} · 오늘 일과가 끝났어요` };
-  return { day, date, period: null, inClass: false,
+  if (!upcoming.length) return { day, date, min: t, period: null, inClass: false, label: `${mdLabel(date, day)} · 오늘 일과가 끝났어요` };
+  return { day, date, min: t, period: null, inClass: false,
            label: `${mdLabel(date, day)} · 쉬는 시간 (다음 ${upcoming[0].name} ${upcoming[0].start} 시작)` };
 }
 

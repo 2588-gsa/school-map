@@ -177,6 +177,9 @@ function renderUserBox() {
     box.appendChild(b);
     return;
   }
+  const home = el("button", { class: "small-btn" }, "📌 내 일정");
+  home.addEventListener("click", goHome);
+  if (myPerson()) box.appendChild(home);
   const name = el("span", { class: "user-name" }, "👤 " + auth.info.name);
   const pw = el("button", { class: "small-btn" }, "비밀번호 변경");
   pw.addEventListener("click", () => showChangePwModal(false));
@@ -196,7 +199,8 @@ function setupAuth() {
     auth.user = user;
     auth.info = user ? infoFromUser(user) : null;
     unloadTimetable();
-    state.person = null; state.highlightId = null; state.myVotes = {};
+    state.person = null; state.highlightId = null; state.myVotes = {}; state.ranking = null;
+    state.selectedId = null;
     if (user && auth.pendingDefault === user.email) {
       try { localStorage.setItem(mustChangeKey(user.uid), "1"); } catch (e) {}
       auth.pendingDefault = null;
@@ -219,6 +223,10 @@ function setupAuth() {
         showToast(e.message, true);
       }
       try { state.myVotes = await store.myVotes(); } catch (e) { state.myVotes = {}; }
+      try {   // 관리자 페이지가 올려 둔 랭킹
+        const rk = await firebase.firestore().collection("private").doc("ranking").get();
+        state.ranking = rk.exists ? rk.data() : null;
+      } catch (e) { state.ranking = null; }
       let must = false;
       try { must = !!localStorage.getItem(mustChangeKey(user.uid)); } catch (e) {}
       if (must) showChangePwModal(true);

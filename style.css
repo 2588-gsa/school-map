@@ -151,3 +151,19 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .voted { font-size: 13px; color: #556; }
 .warn.soft { background: #f3f4f6; color: #666; }
 .status-choices label:last-child { grid-column: span 2; }
+
+/* 내 일정 · 학사일정 · 랭킹 */
+.my-box { background: #eef4ff; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-size: 14px; }
+.my-box h2 { font-size: 17px; margin: 0 0 4px; }
+.my-sec { font-size: 12px; color: #4a5a78; font-weight: bold; margin: 10px 0 2px; }
+.today-ev { font-size: 13px; background: #fff6d6; border-radius: 6px; padding: 4px 8px; margin: 6px 0; }
+.dorm-line2 { margin-top: 8px; font-size: 13px; }
+.my-box > a.tt-link { display: inline-block; margin-top: 8px; font-size: 13px; }
+.dday { display: inline-block; background: #e25c5c; color: #fff; font-weight: bold; font-size: 12px; border-radius: 999px; padding: 2px 10px; margin: 0 4px 6px 0; }
+.ev-exam { color: #c0392b; font-weight: bold; }
+.ev-holiday { color: #c0392b; }
+.ev-swap { color: #2f6fd6; }
+.ev-dorm { color: #888; }
+.tt-row.rank { align-items: center; }
+.rk-name { flex: 1; font-weight: bold; }
+.rk-num { font-size: 12px; color: #667; }
